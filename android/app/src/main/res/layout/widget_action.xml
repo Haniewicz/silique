@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<TextView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_action"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:minHeight="64dp"
+    android:padding="16dp"
+    android:gravity="center"
+    android:textColor="@color/silique_on_surface"
+    android:textSize="15sp"
+    android:background="@drawable/widget_action_background"/>

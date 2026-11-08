@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="WidgetSearchTheme" parent="android:style/Theme.Material.NoActionBar">
+        <!-- Cover the previous Silique task; it may have an unlocked editor. -->
+        <item name="android:windowIsTranslucent">false</item>
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:windowBackground">@color/silique_canvas</item>
+        <item name="android:colorAccent">@color/silique_accent</item>
+        <item name="android:statusBarColor">@color/silique_canvas</item>
+    </style>
+    <style name="WidgetActionTheme" parent="android:style/Theme.NoDisplay"/>
+</resources>

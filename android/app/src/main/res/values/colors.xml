@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#0e1420</color>
+    <!-- Mirrors lib/ui/theme.dart so launcher surfaces match the in-app UI. -->
+    <color name="silique_canvas">#131925</color>
+    <color name="silique_panel">#181f2f</color>
+    <color name="silique_line">#2c3548</color>
+    <color name="silique_muted">#a5aec8</color>
+    <color name="silique_on_surface">#eeefff</color>
+    <color name="silique_accent">#8275ff</color>
+</resources>

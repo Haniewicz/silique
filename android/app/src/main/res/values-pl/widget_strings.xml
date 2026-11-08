@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_notes_description">Notatki Silique</string>
+    <string name="widget_new_note_description">Nowa notatka Silique</string>
+    <string name="widget_search_description">Szukaj w Silique</string>
+    <string name="widget_journal_description">Wpis do dziennika Silique</string>
+    <string name="widget_notes_header">Silique · Notatki ›</string>
+    <string name="widget_notes_locked">Silique · Zablokowane</string>
+    <string name="widget_notes_empty">Brak notatek</string>
+    <string name="widget_new_note">+ Nowa notatka</string>
+    <string name="widget_search_action">⌕ Szukaj notatek</string>
+    <string name="widget_journal_action">✎ Wpis do dziennika</string>
+    <string name="widget_search_hint">Szukaj notatek</string>
+    <string name="widget_untitled">Bez tytułu</string>
+</resources>

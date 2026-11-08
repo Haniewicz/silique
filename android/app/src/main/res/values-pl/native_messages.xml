@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_storage_private_unavailable">Prywatny katalog wyłączony z kopii zapasowych jest niedostępny</string>
+    <string name="native_storage_picker_busy">Wybór katalogu jest już otwarty</string>
+    <string name="native_storage_picker_unavailable">Brak systemowego wyboru katalogu: %1$s</string>
+    <string name="native_storage_access_denied">System nie przyznał trwałego dostępu do katalogu: %1$s</string>
+    <string name="native_storage_folder_failed">Nie udało się użyć katalogu: %1$s</string>
+    <string name="native_import_picker_busy">Wybór folderu jest już otwarty.</string>
+    <string name="native_import_picker_failed">Nie udało się otworzyć wyboru folderu: %1$s</string>
+    <string name="native_import_select_again">Wybierz folder ponownie.</string>
+    <string name="native_import_missing_path">Brak ścieżki.</string>
+    <string name="native_import_invalid_limit">Nieprawidłowy limit pliku.</string>
+    <string name="native_import_file_outside_folder">Plik nie jest częścią wybranego folderu.</string>
+    <string name="native_import_file_too_large">Plik „%1$s” przekracza limit importu.</string>
+    <string name="native_import_file_read_failed">Nie udało się odczytać pliku „%1$s”.</string>
+    <string name="native_import_vault_label">Importowany vault</string>
+    <string name="native_import_folder_failed">Nie udało się otworzyć folderu: %1$s</string>
+    <string name="native_import_folder_too_deep">Folder ma więcej niż 12 poziomów.</string>
+    <string name="native_import_folder_cycle">Dostawca plików zwrócił zapętlony folder.</string>
+    <string name="native_import_folder_read_failed">Nie udało się odczytać folderu „%1$s”.</string>
+    <string name="native_import_invalid_name">Nieprawidłowa nazwa pliku.</string>
+    <string name="native_import_too_many_files">Zbyt wiele plików do jednego importu. Podziel go na części.</string>
+    <string name="native_import_duplicate_path">Dwie pozycje mają tę samą ścieżkę: %1$s</string>
+    <string name="native_update_open_failed">Nie udało się otworzyć aktualizacji.</string>
+    <string name="native_update_invalid_file">Nieprawidłowy plik aktualizacji.</string>
+    <string name="native_update_corrupt_installer">Uszkodzony instalator.</string>
+    <string name="native_update_not_newer">Instalator nie jest nowszą wersją Silique.</string>
+    <string name="native_update_invalid_signature">Nieprawidłowy podpis instalatora.</string>
+</resources>

@@ -1,0 +1,2 @@
+c3bc3c238652b60ae921aa2cca27d9eb5b9657b98f3c66dbb08569c7a554c5f5  Silique-0.2.4.apk
+a66cfd86fb48471f6fee5c552c991bee1bf1788ba20ef2d2d85aca9dc404db0a  Silique-0.2.4-macOS.zip

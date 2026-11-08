@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="utf-8"?>
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/widget_search_backdrop"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent">
+
+    <LinearLayout
+        android:id="@+id/widget_search_card"
+        android:layout_width="match_parent"
+        android:layout_height="match_parent"
+        android:layout_gravity="center"
+        android:layout_margin="16dp"
+        android:orientation="vertical"
+        android:padding="16dp"
+        android:background="@color/silique_canvas"
+        android:clickable="true"
+        android:elevation="8dp">
+
+        <EditText
+            android:id="@+id/widget_query"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:padding="12dp"
+            android:hint="@string/widget_search_hint"
+            android:textColor="@color/silique_on_surface"
+            android:textColorHint="@color/silique_muted"
+            android:background="@drawable/widget_row_background"
+            android:inputType="text|textNoSuggestions"
+            android:imeOptions="actionSearch|flagNoPersonalizedLearning"
+            android:importantForAutofill="no"
+            android:singleLine="true"/>
+
+        <ListView
+            android:id="@+id/widget_results"
+            android:layout_width="match_parent"
+            android:layout_height="0dp"
+            android:layout_weight="1"
+            android:divider="@color/silique_line"
+            android:dividerHeight="1dp"
+            android:scrollbars="none"/>
+    </LinearLayout>
+</FrameLayout>

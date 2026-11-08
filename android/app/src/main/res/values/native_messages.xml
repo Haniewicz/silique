@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="native_storage_private_unavailable">Private no-backup directory unavailable</string>
+    <string name="native_storage_picker_busy">Picker is already open</string>
+    <string name="native_storage_picker_unavailable">System folder picker unavailable: %1$s</string>
+    <string name="native_storage_access_denied">The system did not grant persistent access to the folder: %1$s</string>
+    <string name="native_storage_folder_failed">Could not use the folder: %1$s</string>
+    <string name="native_import_picker_busy">The folder picker is already open.</string>
+    <string name="native_import_picker_failed">Could not open the folder picker: %1$s</string>
+    <string name="native_import_select_again">Select the folder again.</string>
+    <string name="native_import_missing_path">Missing path.</string>
+    <string name="native_import_invalid_limit">Invalid file limit.</string>
+    <string name="native_import_file_outside_folder">The file is not part of the selected folder.</string>
+    <string name="native_import_file_too_large">File “%1$s” exceeds the import limit.</string>
+    <string name="native_import_file_read_failed">Could not read file “%1$s”.</string>
+    <string name="native_import_vault_label">Imported vault</string>
+    <string name="native_import_folder_failed">Could not open the folder: %1$s</string>
+    <string name="native_import_folder_too_deep">The folder has more than 12 levels.</string>
+    <string name="native_import_folder_cycle">The file provider returned a folder loop.</string>
+    <string name="native_import_folder_read_failed">Could not read folder “%1$s”.</string>
+    <string name="native_import_invalid_name">Invalid file name.</string>
+    <string name="native_import_too_many_files">Too many files for one import. Split it into smaller parts.</string>
+    <string name="native_import_duplicate_path">Two entries have the same path: %1$s</string>
+    <string name="native_update_open_failed">Could not open the update.</string>
+    <string name="native_update_invalid_file">Invalid update file.</string>
+    <string name="native_update_corrupt_installer">Corrupt installer.</string>
+    <string name="native_update_not_newer">The installer is not a newer version of Silique.</string>
+    <string name="native_update_invalid_signature">Invalid installer signature.</string>
+</resources>

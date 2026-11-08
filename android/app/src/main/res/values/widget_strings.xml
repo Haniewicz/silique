@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="widget_notes_description">Silique notes</string>
+    <string name="widget_new_note_description">New Silique note</string>
+    <string name="widget_search_description">Search Silique</string>
+    <string name="widget_journal_description">Silique journal entry</string>
+    <string name="widget_notes_header">Silique · Notes ›</string>
+    <string name="widget_notes_locked">Silique · Locked</string>
+    <string name="widget_notes_empty">No notes</string>
+    <string name="widget_new_note">+ New note</string>
+    <string name="widget_search_action">⌕ Search notes</string>
+    <string name="widget_journal_action">✎ Journal entry</string>
+    <string name="widget_search_hint">Search notes</string>
+    <string name="widget_untitled">Untitled</string>
+</resources>
