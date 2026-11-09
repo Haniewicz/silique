@@ -1,7 +1,5 @@
 # Silique
 
-Notatnik Flutter dla Windows, macOS, Linux i Androida. Interfejs według [przekazanego projektu](docs/design-reference.png): granatowe tło, fioletowe akcenty, trzy kolumny na desktopie i mobilna lista z dolną nawigacją.
-
 ## Co działa
 
 - Lokalna praca bez konta, autosave, wiele vaultów, foldery, przypięcia, tagi, kosz i przywracanie. Start w ostatnim vaulcie, import całych folderów Markdown/TXT z zachowaniem hierarchii i natywne przyciski okna.
