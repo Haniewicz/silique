@@ -86,6 +86,7 @@ class ServerTrust {
       'spki': cert.spki,
       'subject': cert.subject,
       'savedAt': DateTime.now().toUtc().toIso8601String(),
+      'notAfter': cert.notAfter.toUtc().toIso8601String(),
     });
   }
 
@@ -182,42 +183,54 @@ class FileTrustStore implements SynchronousServerTrustStore {
 
   File get file => _file;
 
-  Map<String, String?> _loadAllSync() {
+  Map<String, dynamic> _loadAllSync() {
     try {
       final decoded = jsonDecode(_file.readAsStringSync());
-      if (decoded is! Map) return <String, String?>{};
-      return decoded.map((k, v) => MapEntry(k.toString(), v?.toString()));
+      if (decoded is! Map) return <String, dynamic>{};
+      return decoded.map((k, v) => MapEntry(k.toString(), v));
     } catch (_) {
-      return <String, String?>{};
+      return <String, dynamic>{};
     }
   }
 
-  Future<Map<String, String?>> _loadAll() async {
+  Future<Map<String, dynamic>> _loadAll() async {
     try {
       final decoded = jsonDecode(await _file.readAsString());
-      if (decoded is! Map) return <String, String?>{};
-      return decoded.map((k, v) => MapEntry(k.toString(), v?.toString()));
+      if (decoded is! Map) return <String, dynamic>{};
+      return decoded.map((k, v) => MapEntry(k.toString(), v));
     } catch (_) {
-      return <String, String?>{};
+      return <String, dynamic>{};
     }
   }
 
-  @override
-  Map<String, String>? readSync(String serverKey) {
-    final spki = _loadAllSync()[serverKey];
-    return spki == null ? null : {'spki': spki};
+  /// Normalizes a stored value into a `{spki, subject, savedAt, notAfter}`
+  /// record. Legacy files stored a bare SPKI string; those read as a record
+  /// with only the pin present, so the trust decision keeps working while the
+  /// UI metadata (date/expiry) simply remains unknown.
+  static Map<String, String>? _recordOf(dynamic value) {
+    if (value is String) return {'spki': value};
+    if (value is! Map) return null;
+    final out = <String, String>{};
+    for (final entry in value.entries) {
+      final key = entry.key.toString();
+      final valueText = entry.value?.toString();
+      if (valueText != null) out[key] = valueText;
+    }
+    return out.isEmpty ? null : out;
   }
 
   @override
-  Future<Map<String, String>?> read(String serverKey) async {
-    final spki = (await _loadAll())[serverKey];
-    return spki == null ? null : {'spki': spki};
-  }
+  Map<String, String>? readSync(String serverKey) =>
+      _recordOf(_loadAllSync()[serverKey]);
+
+  @override
+  Future<Map<String, String>?> read(String serverKey) async =>
+      _recordOf((await _loadAll())[serverKey]);
 
   @override
   Future<void> write(String serverKey, Map<String, String> record) async {
     final all = await _loadAll();
-    all[serverKey] = record['spki'];
+    all[serverKey] = record;
     final tmp = File('${_file.path}.tmp');
     await tmp.writeAsString(jsonEncode(all));
     await tmp.rename(_file.path);

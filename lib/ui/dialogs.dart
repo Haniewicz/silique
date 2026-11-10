@@ -13,8 +13,10 @@ import 'language_picker.dart';
 import '../core/models.dart';
 import '../core/credential_mode.dart';
 import 'credential_mode_picker.dart';
+import '../core/server_trust.dart';
 import '../core/workspace.dart';
 import '../storage/native_storage.dart';
+import 'server_trust_dialogs.dart';
 import 'theme.dart';
 import 'menus.dart';
 import 'color_picker.dart';
@@ -405,9 +407,18 @@ class SettingsPanel extends StatefulWidget {
     this.updater,
     this.beforeUpdate,
     this.openUpdates = false,
+    this.serverTrust,
+    this.serverBase,
   });
   final Notebook notebook;
   final VoidCallback onChanged;
+
+  /// The pin store consulted when rendering the "Trusted server certificate"
+  /// section. When null the section is omitted (no pinning available).
+  final ServerTrust? serverTrust;
+
+  /// The current server address whose pin the section lists.
+  final Uri? serverBase;
 
   /// The vault the per-vault presentation preferences (compact mode) edit.
   /// The switch is disabled while no unlocked vault is current.
@@ -1486,6 +1497,13 @@ class _SettingsPanelState extends State<SettingsPanel>
                             color: Colors.orangeAccent,
                           ),
                         ),
+                      ),
+                    if (widget.serverTrust != null &&
+                        widget.serverBase != null)
+                      TrustedServerCertSection(
+                        trust: widget.serverTrust!,
+                        base: widget.serverBase!,
+                        onChanged: widget.onChanged,
                       ),
                   ],
                 ),
