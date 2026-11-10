@@ -47,7 +47,11 @@ openssl req -new -x509 -key "$key" -out "$crt" \
   -addext "basicConstraints=critical,CA:FALSE" \
   -addext "keyUsage=critical,digitalSignature" \
   -addext "extendedKeyUsage=codeSigning"
-openssl pkcs12 -export -inkey "$key" -in "$crt" -out "$p12" \
+# `-legacy` is not cosmetic: macOS `security import` rejects the OpenSSL 3
+# default (PBES2/AES-256-CBC + SHA-256 MAC) with "MAC verification failed
+# during PKCS12 import (wrong password?)" — a misleading message that looks
+# like a password problem. The classic SHA-1/3DES encoding imports fine.
+openssl pkcs12 -export -legacy -inkey "$key" -in "$crt" -out "$p12" \
   -name "Silique macOS publisher" -passout "pass:$SILIQUE_MACOS_P12_PASSWORD"
 
 echo "Wygenerowano macOS identity (self-signed, CN=Silique):"
