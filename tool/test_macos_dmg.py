@@ -161,7 +161,7 @@ class DmgContractTests(unittest.TestCase):
                 if extract is not None and certificate_output[0] is not None:
                     prefix = extract.split('=', 1)[1]
                     Path(prefix + '0').write_bytes(certificate_output[0])
-                return b'Authority=Nova Notes Local Preview'
+                return b'Authority=Silique'
             with patch.object(macos_dmg, 'run', side_effect=native_double) as run, \
                     patch.object(macos_dmg, 'PUBLISHER_CERTIFICATE_SHA256', hashlib.sha256(certificate).hexdigest(), create=True):
                 macos_dmg.validate_app(app, '0.2.30', 39)

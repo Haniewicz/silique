@@ -1,8 +1,13 @@
 #!/usr/bin/env python3
 """Stable, isolated local-preview signer. No system trust settings are changed.
 
-The certificate is deliberately self-signed, not an Apple Developer ID. Keep
-this directory with the Android release key when backing up local signing keys.
+The certificate is deliberately self-signed (CN=Silique), not an Apple
+Developer ID — starting 2026-11-10 the macOS identity was rotated away from the
+historical local-preview CN; the Android keystore is unchanged. Signing
+therefore uses --timestamp=none in CI and no hardened runtime on the root app,
+so Gatekeeper still asks before the first launch (right-click → Open, or
+`xattr -d com.apple.quarantine`). Keep signing material outside the repo, e.g.
+~/.local/share/silique-signing/. See docs/migration-signing-identity.md.
 See https://developer.apple.com/library/archive/technotes/tn2206/ .
 """
 

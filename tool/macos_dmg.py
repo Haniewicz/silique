@@ -11,9 +11,14 @@ import sys
 import tempfile
 
 BUNDLE_ID = 'pl.novanotes.novaNotes'
-# Existing leaf certificate from the published 0.2.29 root bundle. Rebranding
-# did not rotate that identity. Pin bytes, never a non-unique display name.
-PUBLISHER_CERTIFICATE_SHA256 = '842a631b45769ded85da4db28638a7060d18628f04b8e721da8f0a3195844217'
+# Leaf certificate of the macOS publisher (self-signed, CN=Silique). Rotated
+# from the historical local-preview identity on 2026-11-10 by owner decision;
+# the Android keystore is intentionally unchanged, so the two platform
+# identities are now asymmetric (see docs/migration-signing-identity.md). The
+# bytes below are PLACEHOLDER-0000000000000000000000000000000000: run
+# tool/make_signing_identity.sh, paste its printed SHA-256 here, and the SHA-1
+# into tool/sign_macos.py. Pin bytes, never a non-unique display name.
+PUBLISHER_CERTIFICATE_SHA256 = '0000000000000000000000000000000000000000000000000000000000000000'
 
 
 def run(*args, stderr=False):

@@ -1,3 +1,31 @@
+# Silique — rotacja tożsamości podpisu macOS: CN=Nova Notes Local Preview → CN=Silique (2026-11-10, NIEWYDANE)
+
+Decyzja właściciela z 2026-11-10 (zaktualizowana): brak konta Apple Developer, więc
+pozostajemy przy self-signed, ale CN podpisu macOS zmienia brzmienie na `Silique`.
+**Android zostaje bez zmian** — ten sam keystore, `CN=Nova Notes`, alias `nova-notes`,
+ten sam pin. Tożsamości są teraz **asymetryczne**: macOS `Silique`, Android
+`Nova Notes`. To świadoma decyzja, nie niedoróbka.
+
+- Stary certyfikat macOS: `CN=Nova Notes Local Preview`, SHA-256 liścia
+  `842a631b45769ded85da4db28638a7060d18628f04b8e721da8f0a3195844217`.
+- Nowy certyfikat macOS: `CN=Silique`, self-signed (RSA 2048, 3650 dni). SHA-256
+  liścia powstaje z wyjścia `tool/make_signing_identity.sh` — patrz
+  [migration-signing-identity.md](migration-signing-identity.md). Dopóki właściciel
+  nie uruchomi generatora i nie wpisze realnego odcisku, pin w `tool/macos_dmg.py`
+  jest placeholderem `0000…0000` (64 zera). **Nie wydawać żadnego macOS wydania,
+  dopóki placeholder nie zostanie podmieniony.**
+- `SUPublicEDKey` (klucz Ed25519 aktualizatora) **bez zmian**.
+- Bundle id `pl.novanotes.novaNotes` (macOS) i `pl.novanotes.nova_notes` (Android)
+  **bez zmian**; katalog `Nova Notes` i `/.well-known/nova-notes` **bez zmian**.
+- Wydania **≤ 0.2.45** są podpisane starą tożsamością macOS `CN=Nova Notes Local
+  Preview`. Po rotacji rejestr podpisu zmienia się od pierwszego wydania z nowym
+  certyfikatem — macOS wymaga **jednorazowej ręcznej reinstalacji DMG** (właściciel
+  to akceptuje wyłącznie dla macOS). Android nie wymaga żadnej akcji użytkownika.
+- Sekrety do podmiany przez właściciela (tylko macOS): `SILIQUE_MACOS_P12`,
+  `SILIQUE_MACOS_P12_PASSWORD`, `SILIQUE_MACOS_CERT` (bez wartości w repo).
+
+---
+
 # Silique 0.2.44+53 — opublikowane: etykieta pęku kluczy macOS migrowana w miejscu
 
 [Publiczne wydanie](https://github.com/Haniewicz/silique-releases/releases/tag/v0.2.44),

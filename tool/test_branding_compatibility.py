@@ -16,6 +16,7 @@ COMPAT = {
         'tool/test_prepare_update.py', 'docs/rebrand.md', 'docs/HANDOFF.md',
         'docs/0.2.19.md', 'docs/0.2.20.md', 'docs/0.2.22.md', 'docs/0.2.27.md',
         'docs/0.2.28.md', 'docs/0.2.29.md', 'docs/0.2.32.md',
+        'docs/migration-signing-identity.md',
     ),
     'pl.novanotes.novaNotes': (
         'macos/Runner/Configs/AppInfo.xcconfig',
@@ -23,23 +24,39 @@ COMPAT = {
         'macos/Runner/DebugProfile.entitlements', 'macos/Runner/Release.entitlements',
         'tool/sign_macos.py', 'tool/install_macos.py', 'tool/macos_dmg.py',
         'tool/test_macos_dmg.py', 'docs/rebrand.md', 'docs/0.2.29.md',
-        'docs/hermes-verification-2026-10-22.md',
+        'docs/hermes-verification-2026-10-22.md', 'docs/migration-signing-identity.md',
+        'docs/HANDOFF.md',
     ),
     'pl.novanotes.keys': (
         'lib/storage/secure_keys.dart', 'macos/Runner/MainFlutterWindow.swift',
         'tool/test_native_language.py', 'docs/rebrand.md', 'docs/releases.md',
     ),
-    '/.well-known/nova-notes': ('lib/services/notebook.dart', 'docs/rebrand.md'),
+    '/.well-known/nova-notes': ('lib/services/notebook.dart', 'docs/rebrand.md', 'docs/migration-signing-identity.md'),
+    # Android keyAlias — compatibility identifier, kept unchanged during the
+    # macOS signing identity rotation. Narrow literal, sign/scoping only.
+    'nova-notes': (
+        'docs/migration-signing-identity.md', 'docs/HANDOFF.md',
+        'tool/make_signing_identity.sh',
+    ),
+    # Legacy data-directory name (persistence identifier, not UI brand) as
+    # named in the rotation handoff/migration docs.
+    'Nova Notes': ('docs/migration-signing-identity.md', 'docs/HANDOFF.md'),
     r'\nkeyAlias=nova-notes\n': ('tool/ci_macos_android.sh', '.github/workflows/build.yml'),
-    'Nova Notes Local Preview': ('tool/test_macos_dmg.py', 'docs/0.2.30.md', 'docs/rebrand.md'),
+    # Historyczny CN podpisu macOS, zrotowany na "Silique" 2026-11-10. Żywą
+    # tożsamością jest CN=Silique; ten literal wolno utrzymywać wyłącznie jako
+    # fakt proweniencji w starych dokumentach, nie w kodzie ani nowych pinach.
+    'Nova Notes Local Preview': ('docs/0.2.30.md', 'docs/rebrand.md', 'docs/migration-signing-identity.md', 'docs/HANDOFF.md'),
     # Historyczny fakt w proweniencji wydań: CN certyfikatu podpisującego
-    # (tożsamość zachowana, nie wolno jej rotować). Wpis wąski: dokładny literal
-    # i wyłącznie pliki proweniencji — nie zwalnia z brandingu żadnego kodu.
+    # ANDROIDA (tożsamość zachowana — rotacja macOS z 2026-11-10 jej NIE dotyczy).
+    # Wpis wąski: dokładny literal i wyłącznie pliki proweniencji/dokumenty rotacji
+    # — nie zwalnia z brandingu żadnego kodu.
     'CN=Nova Notes': (
         'docs/0.2.31.md',
         'docs/0.2.35.md',
         'docs/0.2.36.md',
         'docs/HANDOFF.md',
+        'docs/migration-signing-identity.md',
+        'tool/make_signing_identity.sh',
     ),
 }
 LEGACY_PATH_LINES = {
@@ -122,8 +139,11 @@ class BrandingCompatibility(unittest.TestCase):
             ],
             'android/app/build.gradle.kts': ['applicationId = "pl.novanotes.nova_notes"'],
             'macos/Runner/Configs/AppInfo.xcconfig': ['PRODUCT_BUNDLE_IDENTIFIER = pl.novanotes.novaNotes'],
-            'tool/sign_macos.py': ['certificate leaf = H"{fingerprint}"', 'pl.novanotes.novaNotes'],
-            'tool/macos_dmg.py': ['842a631b45769ded85da4db28638a7060d18628f04b8e721da8f0a3195844217'],
+            'tool/sign_macos.py': ['certificate leaf = H"{fingerprint}"', 'pl.novanotes.novaNotes', 'CN=Silique'],
+            # macOS publisher leaf SHA-256, rotated 2026-11-10 to CN=Silique.
+            # Placeholder until the owner runs tool/make_signing_identity.sh and
+            # pastes its printed digest here and in tool/macos_dmg.py.
+            'tool/macos_dmg.py': ['0000000000000000000000000000000000000000000000000000000000000000'],
         }
         for name, literals in pins.items():
             text = (ROOT / name).read_text()
