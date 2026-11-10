@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
@@ -133,7 +135,12 @@ class _LocationSetupScreenState extends State<LocationSetupScreen> {
   }
 
   Future<void> _adopt(String directory) async {
-    final root = widget.recovering
+    // On a fresh configuration, a chosen folder that already holds a Silique
+    // database (directly or inside its "Silique Vaults" subfolder) is adopted as
+    // existing data instead of being hidden behind a newly created empty vault.
+    // Only a folder with no vault anywhere inside creates a fresh store.
+    final root = widget.recovering ||
+            NativeStorage.containsDatabase(Directory(directory))
         ? NativeStorage.adoptExistingRoot(directory)
         : NativeStorage.prepareChosenRoot(directory);
     // Remember the exact path that is persisted as the location: the macOS

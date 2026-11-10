@@ -154,6 +154,22 @@ class NativeStorage implements NoteStorage {
       File('${directory.path}/silique.sqlite').existsSync() ||
       File('${directory.path}/nova.sqlite').existsSync();
 
+  /// Whether [directory] or its Silique subfolder already holds a database.
+  ///
+  /// Used by the first-run wizard: a chosen folder that contains existing vaults
+  /// (directly, in a `Silique Vaults` subfolder, or as the legacy `Nova Notes`
+  /// folder) must be adopted, never replaced by a fresh empty store.
+  static bool containsDatabase(Directory directory) {
+    if (_hasDatabase(directory)) return true;
+    for (final candidate in [
+      '${directory.path}/$vaultsFolderName',
+      '${directory.path}/Nova Notes',
+    ]) {
+      if (_hasDatabase(Directory(candidate))) return true;
+    }
+    return false;
+  }
+
   /// Files and folders that Silique itself creates in its root.
   static const _ownedEntries = {
     'silique.sqlite',
@@ -347,7 +363,11 @@ class NativeStorage implements NoteStorage {
   /// keychain entry is untouched — is opened again.
   static String adoptExistingRoot(String chosenDirectory) {
     final chosen = Directory(chosenDirectory).absolute;
-    for (final candidate in [chosen.path, '${chosen.path}/$vaultsFolderName']) {
+    for (final candidate in [
+      chosen.path,
+      '${chosen.path}/$vaultsFolderName',
+      '${chosen.path}/Nova Notes',
+    ]) {
       if (_hasDatabase(Directory(candidate))) return candidate;
     }
     throw StorageLocationUnavailable(
