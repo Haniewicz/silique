@@ -24,6 +24,28 @@ Future<void> _settle(WidgetTester tester) async {
   }
 }
 
+/// Pumps until [done] is true, bounded by wall-clock [timeout].
+///
+/// A fixed number of frames is a guess: the CI runner takes longer than the
+/// laptop to read the chosen folder and open the database, so the callback
+/// simply had not fired yet when the assertions ran.
+Future<void> _waitFor(
+  WidgetTester tester,
+  bool Function() done, {
+  Duration timeout = const Duration(seconds: 30),
+}) async {
+  final deadline = DateTime.now().add(timeout);
+  while (!done()) {
+    if (DateTime.now().isAfter(deadline)) {
+      throw TestFailure('condition not met within ${timeout.inSeconds}s');
+    }
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 25)));
+    await tester.pump(const Duration(milliseconds: 25));
+  }
+  await tester.pump();
+}
+
 /// Creates a real Silique database at [root] holding one vault named [name].
 ///
 /// Uses the real [NativeStorage] so the file matches exactly what
@@ -92,7 +114,7 @@ void main() {
       debugDirectoryPicker = () async => StorageChoice(path: picked.path);
       await _mount(tester, onChosen: (value) async => chosenRoots.add(value));
       await tester.tap(find.byKey(const Key('choose-location')));
-      await _settle(tester);
+      await _waitFor(tester, () => chosenRoots.isNotEmpty);
 
       // The existing store is adopted directly: no new empty vault folder is
       // created beside the data.
@@ -137,7 +159,7 @@ void main() {
     debugDirectoryPicker = () async => StorageChoice(path: picked.path);
     await _mount(tester, onChosen: (value) async => chosenRoots.add(value));
     await tester.tap(find.byKey(const Key('choose-location')));
-    await _settle(tester);
+    await _waitFor(tester, () => chosenRoots.isNotEmpty);
 
     expect(chosenRoots, hasLength(1));
     final reopened = NativeStorage(chosenRoots.single);
@@ -153,7 +175,7 @@ void main() {
     debugDirectoryPicker = () async => StorageChoice(path: picked.path);
     await _mount(tester, onChosen: (value) async => chosenRoots.add(value));
     await tester.tap(find.byKey(const Key('choose-location')));
-    await _settle(tester);
+    await _waitFor(tester, () => chosenRoots.isNotEmpty);
 
     expect(chosenRoots, hasLength(1));
     expect(chosenRoots.single, '${picked.path}/${NativeStorage.vaultsFolderName}');
@@ -178,7 +200,7 @@ void main() {
     debugDirectoryPicker = () async => StorageChoice(path: picked.path);
     await _mount(tester, onChosen: (value) async => chosenRoots.add(value));
     await tester.tap(find.byKey(const Key('choose-location')));
-    await _settle(tester);
+    await _waitFor(tester, () => chosenRoots.isNotEmpty);
 
     expect(chosenRoots, hasLength(1));
     // The legacy folder itself is adopted (its nova.sqlite is reopened).
@@ -211,12 +233,14 @@ void main() {
       },
     );
     await tester.tap(find.byKey(const Key('choose-location')));
-    await _settle(tester);
+    await _waitFor(tester, () => chosenRoots.isNotEmpty);
 
     // The corrupt database is adopted (never replaced by a fresh sibling), and
     // the failure is reported instead of hidden behind empty notebooks.
     expect(chosenRoots, hasLength(1));
     expect(chosenRoots.single, vaultFolder);
+    await _waitFor(
+        tester, () => find.byKey(const Key('location-error')).evaluate().isNotEmpty);
     expect(find.byKey(const Key('location-error')), findsOneWidget);
     expect(
       Directory(vaultFolder)
