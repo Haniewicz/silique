@@ -3,6 +3,12 @@ $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
 $source = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
 $baselineSha = 'f11e1fc1b47e775c301264868dd10a7813beb0cc'
+# The public repository carries a squashed history, so the original baseline
+# commit does not exist there. When it is missing the timing control is skipped
+# EXPLICITLY (loud marker + reduced acceptance scope in the result JSON); the
+# strict FINAL close/verifier gate below stays mandatory either way.
+$baselineAvailable = $true
+try { git rev-parse --verify --quiet "$baselineSha^{commit}" | Out-Null } catch { $baselineAvailable = $false }
 $evidence = Join-Path $env:RUNNER_TEMP ('silique-close-' + [guid]::NewGuid().ToString('N'))
 $baseline = Join-Path $evidence 'baseline'
 New-Item -ItemType Directory $evidence | Out-Null
@@ -63,9 +69,15 @@ function Invoke-CloseMeasurement([string]$Name, [string]$Executable,
 try {
     # Source history was fetched with the existing read-only checkout key, which
     # actions/checkout removes. Do not fetch private code with printed credentials.
-    git worktree add --detach $baseline $baselineSha
-    Copy-Item (Join-Path $PSScriptRoot 'windows_close_owner_probe.dart') (Join-Path $baseline 'tool/windows_close_owner_probe.dart')
-    foreach ($entry in @(@{Name='baseline'; Root=$baseline}, @{Name='final'; Root=$source})) {
+    if ($baselineAvailable) {
+        git worktree add --detach $baseline $baselineSha
+        Copy-Item (Join-Path $PSScriptRoot 'windows_close_owner_probe.dart') (Join-Path $baseline 'tool/windows_close_owner_probe.dart')
+    } else {
+        Write-Output 'CLOSE_BASELINE_UNAVAILABLE public history lacks the baseline commit; measuring final and strict-final only'
+        $baselineObservations.Add('baseline unavailable: public repository history does not contain ' + $baselineSha)
+    }
+    $entries = if ($baselineAvailable) { @(@{Name='baseline'; Root=$baseline}, @{Name='final'; Root=$source}) } else { @(@{Name='final'; Root=$source}) }
+    foreach ($entry in $entries) {
         Push-Location $entry.Root
         try {
             Write-Output "CLOSE_TIMING_SOURCE $($entry.Name) $(git rev-parse HEAD)"
@@ -106,11 +118,11 @@ try {
         baseline_sha = $baselineSha
         baseline_passed = ($runs.Count -gt 0 -and $runs[0].measurement.passed -eq $true)
         baseline_observations = @($baselineObservations.ToArray())
-        acceptance_scope = 'final and strict-final only'
+        acceptance_scope = if ($baselineAvailable) { 'final and strict-final only' } else { 'final and strict-final only; baseline timing control unavailable in public history' }
         evidence_directory = $evidence
         runs = @($runs.ToArray())
         blocked = $blocked
-        passed = ($errors.Count -eq 0 -and $runs.Count -eq 3 -and -not $blocked)
+        passed = ($errors.Count -eq 0 -and $runs.Count -eq $(if ($baselineAvailable) { 3 } else { 2 }) -and -not $blocked)
         errors = @($errors.ToArray())
     } | ConvertTo-Json -Depth 10 | Set-Content (Join-Path $evidence 'windows-close-comparison-result.json')
 }
