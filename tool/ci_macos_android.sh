@@ -52,7 +52,11 @@ preflight="$(mktemp -d "$RUNNER_TEMP/macos-dmg-preflight.XXXXXX")"
 curl --fail --location --proto '=https' --tlsv1.2 https://github.com/Haniewicz/silique-releases/releases/download/v0.2.29/Silique-0.2.29-macOS.zip -o "$preflight/previous.zip"
 printf '%s  %s\n' cf5bdf69cc45f9cf5e36068c578a17932af03ff3a16c4a51c98d070b2b1b6285 "$preflight/previous.zip" | shasum -a 256 -c -
 ditto -x -k "$preflight/previous.zip" "$preflight/input"
-python3 tool/macos_dmg.py build --app "$preflight/input/Silique.app" --image "$preflight/preflight.dmg" --version 0.2.29 --build 38
+# 0.2.29 is immutable and signed by the historical publisher identity, so the
+# preflight must pin THAT identity — the current pin can never match it after
+# the 2026-11-10 rotation.
+python3 tool/macos_dmg.py build --app "$preflight/input/Silique.app" --image "$preflight/preflight.dmg" --version 0.2.29 --build 38 \
+  --expected-certificate 842a631b45769ded85da4db28638a7060d18628f04b8e721da8f0a3195844217
 rm -rf "$preflight"
 flutter pub get
 flutter analyze

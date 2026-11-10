@@ -215,6 +215,39 @@ class DmgContractTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 validate_layout(root)
 
+    def test_expected_certificate_lets_a_historical_artifact_pass(self):
+        """The 0.2.29 preflight archive is signed by the previous publisher, so
+        the expected identity must be an explicit argument — comparing it with
+        the current pin can never succeed after a rotation."""
+        import hashlib
+        import macos_dmg
+        with tempfile.TemporaryDirectory() as folder:
+            app = Path(folder) / 'Silique.app'
+            (app / 'Contents/MacOS').mkdir(parents=True)
+            (app / 'Contents/MacOS/Silique').write_bytes(b'fixture')
+            info = {'CFBundleIdentifier': 'pl.novanotes.novaNotes',
+                    'CFBundleShortVersionString': '0.2.29', 'CFBundleVersion': '38',
+                    'CFBundleExecutable': 'Silique', 'CFBundlePackageType': 'APPL'}
+            (app / 'Contents/Info.plist').write_bytes(plistlib.dumps(info))
+            historical = b'old published certificate fixture'
+            def native_double(*args, **kwargs):
+                extract = next((arg for arg in args if arg.startswith('--extract-certificates=')), None)
+                if extract is not None:
+                    Path(extract.split('=', 1)[1] + '0').write_bytes(historical)
+                return b'Authority=Silique'
+            with patch.object(macos_dmg, 'run', side_effect=native_double), \
+                    patch.object(macos_dmg, 'PUBLISHER_CERTIFICATE_SHA256', 'f' * 64, create=True):
+                # Explicit historical pin: accepted even though the current pin differs.
+                macos_dmg.validate_app(
+                    app, '0.2.29', 38,
+                    expected_certificate=hashlib.sha256(historical).hexdigest())
+                # Wrong explicit pin: rejected.
+                with self.assertRaisesRegex(ValueError, 'publisher certificate differs'):
+                    macos_dmg.validate_app(app, '0.2.29', 38, expected_certificate='0' * 64)
+                # No explicit pin: falls back to the (current) module pin.
+                with self.assertRaisesRegex(ValueError, 'publisher certificate differs'):
+                    macos_dmg.validate_app(app, '0.2.29', 38)
+
 
 if __name__ == '__main__':
     unittest.main()

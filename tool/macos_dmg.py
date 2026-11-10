@@ -18,7 +18,14 @@ BUNDLE_ID = 'pl.novanotes.novaNotes'
 # bytes below are PLACEHOLDER-0000000000000000000000000000000000: run
 # tool/make_signing_identity.sh, paste its printed SHA-256 here, and the SHA-1
 # into tool/sign_macos.py. Pin bytes, never a non-unique display name.
+# Current signer (CN=Silique, rotated 2026-11-10).
 PUBLISHER_CERTIFICATE_SHA256 = 'bf965f8369bbd9d8688ea31a3e87200f8752485a57e09f2d5599eb76947074a8'
+
+# Identity that signed everything up to and including 0.2.45. CI still validates
+# the immutable 0.2.29 archive from the release feed as a preflight, and that
+# artifact can never carry the current certificate — so the expected identity is
+# an explicit argument, never an implicit "whatever is in the repo today".
+HISTORICAL_PUBLISHER_CERTIFICATE_SHA256 = '842a631b45769ded85da4db28638a7060d18628f04b8e721da8f0a3195844217'
 
 
 def run(*args, stderr=False):
@@ -32,7 +39,7 @@ def run(*args, stderr=False):
     return result.stderr if stderr else result.stdout
 
 
-def validate_app(app, version, build):
+def validate_app(app, version, build, *, expected_certificate=None):
     app = Path(app)
     contents = app / 'Contents'
     plist = contents / 'Info.plist'
@@ -61,8 +68,9 @@ def validate_app(app, version, build):
         # associates it with this option when joined by '='.
         run('/usr/bin/codesign', '-d', '--extract-certificates=' + prefix, str(app))
         certificate = Path(prefix + '0')
+        expected = expected_certificate or PUBLISHER_CERTIFICATE_SHA256
         if (certificate.is_symlink() or not certificate.is_file()
-                or hashlib.sha256(certificate.read_bytes()).hexdigest() != PUBLISHER_CERTIFICATE_SHA256):
+                or hashlib.sha256(certificate.read_bytes()).hexdigest() != expected):
             raise ValueError('macOS publisher certificate differs from the existing identity.')
 
 
@@ -138,11 +146,11 @@ def verify_dmg(image, version, build):
         mount.rmdir()
 
 
-def build_dmg(app, image, version, build, *, replace=False):
+def build_dmg(app, image, version, build, *, replace=False, expected_certificate=None):
     app, image = Path(app), Path(image)
     if (image.exists() and not replace) or image.is_symlink() or image.suffix != '.dmg':
         raise ValueError('Use a new .dmg output; do not overwrite a candidate.')
-    validate_app(app, version, build)
+    validate_app(app, version, build, expected_certificate=expected_certificate)
     image.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.silique-dmg-', dir=image.parent) as folder:
         temporary = Path(folder)
@@ -172,6 +180,11 @@ def main():
     parser.add_argument('--replace', action='store_true', help='Atomically replace a local candidate only after successful verification')
     parser.add_argument('--version')
     parser.add_argument('--build', type=int)
+    parser.add_argument(
+        '--expected-certificate', default=None,
+        help='Expected leaf SHA-256; defaults to the current publisher. Immutable '
+             'historical artifacts (the 0.2.29 preflight archive) must pass '
+             'HISTORICAL_PUBLISHER_CERTIFICATE_SHA256 explicitly.')
     args = parser.parse_args()
     if sys.platform != 'darwin':
         parser.error('Native hdiutil/codesign verification requires macOS.')
@@ -183,7 +196,8 @@ def main():
     if args.operation == 'build':
         if args.app is None:
             parser.error('--app is required for build')
-        build_dmg(args.app, args.image, args.version, args.build, replace=args.replace)
+        build_dmg(args.app, args.image, args.version, args.build, replace=args.replace,
+                  expected_certificate=args.expected_certificate)
     else:
         verify_dmg(args.image, args.version, args.build)
     print(f'Native DMG {args.operation} verified: {args.version}+{args.build}')
