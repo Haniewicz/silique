@@ -115,7 +115,7 @@ def validate_layout(root):
                     raise ValueError('Extra app bundle in disk image.')
 
 
-def verify_dmg(image, version, build):
+def verify_dmg(image, version, build, *, expected_certificate=None):
     image = Path(image)
     if image.is_symlink() or not image.is_file() or image.suffix != '.dmg':
         raise ValueError('Expected a real .dmg installer.')
@@ -139,7 +139,8 @@ def verify_dmg(image, version, build):
         validate_layout(mount)
         if not os.statvfs(mount).f_flag & os.ST_RDONLY:
             raise ValueError('DMG was not mounted read-only.')
-        validate_app(mount / 'Silique.app', version, build)
+        validate_app(mount / 'Silique.app', version, build,
+                     expected_certificate=expected_certificate)
     finally:
         if attached:
             run('/usr/bin/hdiutil', 'detach', str(mount))
@@ -168,7 +169,7 @@ def build_dmg(app, image, version, build, *, replace=False, expected_certificate
         candidate = temporary / 'Silique-macOS.dmg'
         run('/usr/bin/hdiutil', 'create', '-volname', f'Silique {version}',
             '-fs', 'HFS+', '-format', 'UDZO', '-srcfolder', str(stage), str(candidate))
-        verify_dmg(candidate, version, build)
+        verify_dmg(candidate, version, build, expected_certificate=expected_certificate)
         candidate.replace(image)
 
 
@@ -199,7 +200,8 @@ def main():
         build_dmg(args.app, args.image, args.version, args.build, replace=args.replace,
                   expected_certificate=args.expected_certificate)
     else:
-        verify_dmg(args.image, args.version, args.build)
+        verify_dmg(args.image, args.version, args.build,
+                   expected_certificate=args.expected_certificate)
     print(f'Native DMG {args.operation} verified: {args.version}+{args.build}')
 
 
