@@ -8,7 +8,15 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-loader = importlib.machinery.SourceFileLoader('hermes_collect', str(Path(__file__).parent / 'hermes/silique'))
+# The owner's operations script is deliberately not part of this repository, so
+# this module skips instead of failing the whole suite on a public checkout
+# (previously it broke every CI build of the candidate workflows).
+_SCRIPT = Path(__file__).parent / 'hermes/silique'
+if not _SCRIPT.exists():
+    raise unittest.SkipTest(
+        'owner-only operations script tool/hermes/silique is not shipped here')
+
+loader = importlib.machinery.SourceFileLoader('hermes_collect', str(_SCRIPT))
 spec = importlib.util.spec_from_loader(loader.name, loader)
 assert spec is not None
 operations = importlib.util.module_from_spec(spec)
