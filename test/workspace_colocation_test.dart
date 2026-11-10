@@ -96,6 +96,10 @@ void main() {
   setUp(() {
     root = Directory.systemTemp.createTempSync('silique-colocation-');
     chosenRoots.clear();
+    // On macOS the screen asks the native side to remember the folder grant.
+    // A widget test has no such plugin, so without this override the flow dies
+    // before onChosen ever fires (green on Linux, red on the macOS runner).
+    debugStorageAccess = (_) {};
   });
 
   tearDown(() {
