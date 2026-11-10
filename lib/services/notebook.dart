@@ -15,6 +15,7 @@ import '../storage/native_storage.dart';
 import '../storage/vault_import.dart';
 
 import '../core/contracts.dart';
+import '../core/server_trust.dart';
 import '../core/credential_mode.dart';
 import '../core/models.dart';
 import '../core/merge.dart';
@@ -77,11 +78,13 @@ class Notebook {
     required this.storage,
     required KeyStore keys,
     required this.crypto,
-  }) {
+    ServerTrust? trust,
+  }) : trust = trust ?? ServerTrust(store: InMemoryTrustStore()) {
     this.keys = keys is CredentialModeControl
         ? _NotebookCredentialKeys(this, keys, keys as CredentialModeControl)
         : _NotebookKeys(this, keys);
   }
+  final ServerTrust trust;
   NoteStorage storage;
   List<Json>? devices;
   String? _lastVaultId;
@@ -316,7 +319,7 @@ class Notebook {
     if (cached != null) {
       session = Session.fromJson(jsonDecode(cached) as Json);
       await _loadIdentity('${session!.server}|${session!.email.toLowerCase()}');
-      api = SiliqueApi(session!.server, token: session!.token);
+      api = SiliqueApi(session!.server, token: session!.token, trust: trust);
       final master = await keys.read(await _accountSlot(session!.owner));
       if (master != null) accountKey = base64Decode(master);
     }
@@ -1735,7 +1738,7 @@ class Notebook {
     String? invitation,
     String? recoveryKey,
   }) async {
-    final transport = SiliqueApi(server);
+    final transport = SiliqueApi(server, trust: trust);
     try {
       Json discovery;
       try {

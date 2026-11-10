@@ -236,3 +236,21 @@ class FileTrustStore implements SynchronousServerTrustStore {
     await tmp.rename(_file.path);
   }
 }
+
+/// In-memory store for tests and for callers with no durable location yet.
+/// Pins written here do not survive a restart, which is exactly why the app
+/// always prefers [FileTrustStore] when an application-support path is known.
+class InMemoryTrustStore implements SynchronousServerTrustStore {
+  final Map<String, Map<String, String>> _records = {};
+
+  @override
+  Future<Map<String, String>?> read(String serverKey) async => readSync(serverKey);
+
+  @override
+  Map<String, String>? readSync(String serverKey) => _records[serverKey];
+
+  @override
+  Future<void> write(String serverKey, Map<String, String> record) async {
+    _records[serverKey] = Map<String, String>.of(record);
+  }
+}

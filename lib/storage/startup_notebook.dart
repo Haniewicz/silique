@@ -1,4 +1,7 @@
+import 'dart:io';
+
 import '../core/contracts.dart';
+import '../core/server_trust.dart';
 import '../l10n/strings.dart';
 import '../services/notebook.dart';
 import 'native_crypto.dart';
@@ -25,10 +28,23 @@ Future<Notebook> openStartupNotebook(
   // the database, and SQLite cannot even read it, because publishing the WAL
   // index needs a write. Diagnosing the folder keeps the message honest.
   NativeStorage.verifyRootWritable(root);
+  // Pins live beside the app's own support files, not in the vault, so they are
+  // readable before unlock. Without a known location the store stays in memory
+  // and the pin only lasts for this run — pinning must never be silently off.
+  final trust = ServerTrust(
+    store: applicationSupport == null
+        ? InMemoryTrustStore()
+        : FileTrustStore(
+            File(
+              '$applicationSupport${Platform.pathSeparator}server-trust.json',
+            ),
+          ),
+  );
   final notebook = Notebook(
     storage: NativeStorage(root),
     keys: keys,
     crypto: NativeCrypto(),
+    trust: trust,
   );
   try {
     // Missing credentials are a recovery condition, not a fresh installation.

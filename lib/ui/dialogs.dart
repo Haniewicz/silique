@@ -7,6 +7,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import '../services/notebook.dart';
+import '../services/api.dart';
 import '../services/app_updates.dart';
 import 'updates_panel.dart';
 import 'language_picker.dart';
@@ -521,13 +522,22 @@ class _SettingsPanelState extends State<SettingsPanel>
   }
 
   Future<void> connect() => run(() async {
-    final key = await repo.connect(
-      server.text,
-      email.text,
-      password.text,
-      register: register,
-      invitation: invite.text,
-      recoveryKey: recovery.text,
+    // A self-signed server must be confirmable instead of fatal: the pin is
+    // stored once, the attempt is retried exactly once, and every later
+    // connection goes through the same badCertificateCallback.
+    final base = SiliqueApi.validateServer(server.text);
+    final key = await connectTrustingServerCertificate<String?>(
+      context: context,
+      trust: repo.trust,
+      base: base,
+      attempt: () => repo.connect(
+        server.text,
+        email.text,
+        password.text,
+        register: register,
+        invitation: invite.text,
+        recoveryKey: recovery.text,
+      ),
     );
     password.clear();
     recovery.clear();
