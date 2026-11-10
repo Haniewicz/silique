@@ -8,7 +8,8 @@ self-signed (albo jego łańcucha nie uznaje system), przy pierwszym połączeni
 Silique pokazuje dialog „Nieznany certyfikat serwera" z:
 
 - **odciskiem klucza (SPKI)** — SHA-256 klucza publicznego, w grupach po 4 znaki,
-  w tym samym formacie, który wypisuje `./infra/install.sh status`,
+  w tym samym formacie, który wypisuje `./infra/install.sh status` (hex, wielkimi literami,
+  pole `cert-spki`) — czyli porównujesz znak po znaku, bez konwersji,
 - **podmiotem** (`subject`) i **datą ważności** (`notAfter`),
 - instrukcją porównania odcisku z tym, który podaje serwer.
 

@@ -74,7 +74,12 @@ void main() {
       final fingerprint = tester.widget<SelectableText>(
         find.byKey(const Key('server-trust-fingerprint')),
       );
-      expect(fingerprint.data, groupSpki(_spkiA));
+      expect(fingerprint.data, spkiDisplay(_spkiA));
+      // The dialog must use the same alphabet the server prints: hex, not base64.
+      expect(fingerprint.data, isNot(contains('MDEy')));
+      expect(fingerprint.data!.replaceAll(' ', ''), spkiHex(_spkiA));
+      expect(spkiHex(_spkiA), matches(RegExp(r'^[0-9A-F]+$')));
+      expect(spkiHex(_spkiA).length.isEven, isTrue);
       expect(find.textContaining('CN=notes.example.com'), findsOneWidget);
 
       await tester.tap(find.text('Anuluj'));
@@ -159,7 +164,7 @@ void main() {
               find.byKey(const Key('server-trust-expected')),
             )
             .data,
-        groupSpki(_spkiA),
+        spkiDisplay(_spkiA),
       );
       expect(
         tester
@@ -167,7 +172,7 @@ void main() {
               find.byKey(const Key('server-trust-actual')),
             )
             .data,
-        groupSpki(_spkiB),
+        spkiDisplay(_spkiB),
       );
       expect(find.text('Zaufaj temu serwerowi'), findsNothing);
       expect(find.byKey(const Key('server-trust-mismatch-close')), findsOneWidget);
@@ -239,7 +244,7 @@ void main() {
               find.byKey(const Key('server-trust-pinned')),
             )
             .data,
-        groupSpki(_spkiA),
+        spkiDisplay(_spkiA),
       );
       expect(find.byKey(const Key('server-trust-pinned-at')), findsOneWidget);
       expect(

@@ -1,3 +1,5 @@
+import 'dart:convert';
+
 import '../l10n/app_language.dart';
 
 import 'package:flutter/material.dart';
@@ -6,6 +8,24 @@ import '../core/server_trust.dart';
 import '../services/api.dart';
 import 'menus.dart';
 import 'theme.dart';
+
+/// Hex (uppercase) of a base64 SPKI pin — the format `./infra/install.sh status`
+/// prints for `cert-spki`. The pin travels as base64, but comparing it against
+/// the server's output requires the same alphabet on both sides.
+String spkiHex(String spki) {
+  try {
+    final bytes = base64Decode(spki.replaceAll(RegExp(r'\s+'), ''));
+    return bytes
+        .map((b) => b.toRadixString(16).padLeft(2, '0'))
+        .join()
+        .toUpperCase();
+  } catch (_) {
+    return spki.toUpperCase();
+  }
+}
+
+/// Fingerprint exactly as the user must type/compare it: grouped hex.
+String spkiDisplay(String spki) => groupSpki(spkiHex(spki));
 
 /// Groups a base64 fingerprint into 4-character groups separated by spaces, the
 /// same layout `./infra/install.sh status` prints, so the two can be compared
@@ -89,7 +109,7 @@ Future<bool> showUnknownCertificateDialog(
               ),
               const SizedBox(height: 8),
               SelectableText(
-                groupSpki(error.spki),
+                spkiDisplay(error.spki),
                 key: const Key('server-trust-fingerprint'),
                 contextMenuBuilder: siliqueTextContextMenu,
                 style: const TextStyle(
@@ -182,7 +202,7 @@ Future<void> showPinMismatchDialog(
                 ),
               ),
               SelectableText(
-                groupSpki(error.expected),
+                spkiDisplay(error.expected),
                 key: const Key('server-trust-expected'),
                 contextMenuBuilder: siliqueTextContextMenu,
                 style: const TextStyle(
@@ -202,7 +222,7 @@ Future<void> showPinMismatchDialog(
                 ),
               ),
               SelectableText(
-                groupSpki(error.actual),
+                spkiDisplay(error.actual),
                 key: const Key('server-trust-actual'),
                 contextMenuBuilder: siliqueTextContextMenu,
                 style: const TextStyle(
@@ -469,7 +489,7 @@ class _TrustedServerCertSectionState extends State<TrustedServerCertSection> {
           )
         else if (spki != null) ...[
           SelectableText(
-            groupSpki(spki),
+            spkiDisplay(spki),
             key: const Key('server-trust-pinned'),
             contextMenuBuilder: siliqueTextContextMenu,
             style: const TextStyle(
