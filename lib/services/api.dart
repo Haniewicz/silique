@@ -3,12 +3,14 @@ import '../l10n/strings.dart';
 import 'dart:async';
 import 'dart:collection';
 import 'dart:convert';
-import 'dart:io' show HttpDate;
+import 'dart:io' show HttpDate, HttpClient, X509Certificate;
 
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 
 import '../core/contracts.dart';
 import '../core/models.dart';
+import '../core/server_trust.dart';
 
 class ApiException implements Exception {
   ApiException(this.status, this.message, {this.retryAfter, this.path});
@@ -20,19 +22,118 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Thrown when a connection presents a certificate that is neither trusted by
+/// the platform nor covered by a confirmed pin. Carries the fingerprint and
+/// metadata so the caller can present an informed confirmation prompt — never
+/// a silent accept.
+class UntrustedServerCertificate implements Exception {
+  UntrustedServerCertificate({
+    required this.spki,
+    required this.subject,
+    this.san,
+    required this.notAfter,
+  });
+
+  final String spki;
+  final String subject;
+  final String? san;
+  final DateTime notAfter;
+
+  @override
+  String toString() =>
+      'UntrustedServerCertificate(spki: $spki, subject: $subject, '
+      'notAfter: $notAfter)';
+}
+
+/// Thrown when a connected server presents a public key that does not match the
+/// confirmed pin. This is a hard block — no "trust anyway" flag exists.
+class ServerCertificatePinMismatch implements Exception {
+  ServerCertificatePinMismatch({required this.expected, required this.actual});
+
+  /// The confirmed SPKI pin.
+  final String expected;
+
+  /// The SPKI of the certificate actually presented.
+  final String actual;
+
+  @override
+  String toString() =>
+      'ServerCertificatePinMismatch(expected: $expected, actual: $actual)';
+}
+
+/// Thrown when a cert's public key matches the pin but the certificate has
+/// expired. The pin alone must never admit an expired certificate, because
+/// `badCertificateCallback` does not report *why* validation failed.
+class ServerCertificateExpired implements Exception {
+  ServerCertificateExpired(this.notAfter);
+  final DateTime notAfter;
+  @override
+  String toString() => 'ServerCertificateExpired(notAfter: $notAfter)';
+}
+
 class SiliqueApi implements SyncTransport {
   SiliqueApi(
     String server, {
     this.token,
     http.Client? client,
+    ServerTrust? trust,
     DateTime Function()? now,
     Duration Function()? elapsed,
   }) : base = validateServer(server),
-       client = client ?? http.Client(),
+       client = client ?? _clientFor(trust),
        _now = now ?? DateTime.now,
-       _elapsed = elapsed ?? _monotonicClock();
+       _elapsed = elapsed ?? _monotonicClock(),
+       trust = trust;
+
+  /// Builds the transport client. Without [ServerTrust], behavior is identical
+  /// to the historical default: a plain `http.Client()` over the platform's
+  /// normal TLS validation. Only when a [ServerTrust] is supplied do we install
+  /// a `badCertificateCallback` that consults a public-key pin as the *fallback*
+  /// for certificates the platform itself rejected.
+  static http.Client _clientFor(ServerTrust? trust) {
+    if (trust == null) return http.Client();
+    final inner = HttpClient()
+      ..badCertificateCallback = (X509Certificate cert, String host, int port) {
+        final base = Uri(scheme: 'https', host: host, port: port);
+        return _badCertificateSync(trust, cert, base);
+      };
+    return IOClient(inner);
+  }
+
+  /// Resolves the trust decision synchronously for `badCertificateCallback`
+  /// (which cannot await). A pin-backed [ServerTrust] backed by a
+  /// [SynchronousServerTrustStore] reads a small JSON file on this path.
+  static bool _badCertificateSync(
+    ServerTrust trust,
+    X509Certificate cert,
+    Uri base,
+  ) {
+    final decision = trust.decideSync(cert: cert, base: base);
+    switch (decision) {
+      case TrustDecision.allow:
+        return true;
+      case TrustDecision.pinMismatch:
+        final info = certInfoOf(cert);
+        throw ServerCertificatePinMismatch(
+          expected: trust.lastExpectedPin ?? '',
+          actual: info.spki,
+        );
+      case TrustDecision.expired:
+        throw ServerCertificateExpired(cert.endValidity);
+      case TrustDecision.unknownCertificate:
+        final info = certInfoOf(cert);
+        throw UntrustedServerCertificate(
+          spki: info.spki,
+          subject: info.subject,
+          san: info.san,
+          notAfter: info.notAfter,
+        );
+    }
+  }
+
   final DateTime Function() _now;
   final Duration Function() _elapsed;
+  final ServerTrust? trust;
 
   static Duration Function() _monotonicClock() {
     final clock = Stopwatch()..start();
