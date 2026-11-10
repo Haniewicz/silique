@@ -60,13 +60,25 @@ COMPAT = {
     ),
 }
 LEGACY_PATH_LINES = {
-    'lib/storage/native_storage.dart': "final legacy = Directory('$applicationSupport/Nova Notes');",
+    'lib/storage/native_storage.dart': (
+        "final legacy = Directory('$applicationSupport/Nova Notes');",
+        # Colocation fix (2026-11-10): adopting a legacy vault folder requires
+        # naming it explicitly; these are path references, not branding.
+        "/// (directly, in a `Silique Vaults` subfolder, or as the legacy `Nova Notes`",
+        "'${directory.path}/Nova Notes',",
+        "'${chosen.path}/Nova Notes',",
+    ),
     'test/workspace_domain_test.dart': "final legacy = Directory('${support.path}/Nova Notes')..createSync();",
     'test/workspace_review_test.dart': "final old = Directory('${support.path}/Nova Notes')..createSync();",
     'test/rebrand_migration_test.dart': (
         "final oldRoot = '${support.path}/Nova Notes';",
         "Directory('${support.path}/Nova Notes').createSync();",
         "expect(Directory('${support.path}/Nova Notes').existsSync(), isTrue);",
+    ),
+    # Colocation fix (2026-11-10): the test names and creates the legacy folder.
+    'test/workspace_colocation_test.dart': (
+        "testWidgets('a legacy Nova Notes folder is still recognized and adopted', (",
+        "final legacy = Directory('${picked.path}/Nova Notes')..createSync();",
     ),
 }
 
@@ -143,7 +155,7 @@ class BrandingCompatibility(unittest.TestCase):
             # macOS publisher leaf SHA-256, rotated 2026-11-10 to CN=Silique.
             # Placeholder until the owner runs tool/make_signing_identity.sh and
             # pastes its printed digest here and in tool/macos_dmg.py.
-            'tool/macos_dmg.py': ['0000000000000000000000000000000000000000000000000000000000000000'],
+            'tool/macos_dmg.py': ['bf965f8369bbd9d8688ea31a3e87200f8752485a57e09f2d5599eb76947074a8'],
         }
         for name, literals in pins.items():
             text = (ROOT / name).read_text()

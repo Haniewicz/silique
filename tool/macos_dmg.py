@@ -18,7 +18,7 @@ BUNDLE_ID = 'pl.novanotes.novaNotes'
 # bytes below are PLACEHOLDER-0000000000000000000000000000000000: run
 # tool/make_signing_identity.sh, paste its printed SHA-256 here, and the SHA-1
 # into tool/sign_macos.py. Pin bytes, never a non-unique display name.
-PUBLISHER_CERTIFICATE_SHA256 = '0000000000000000000000000000000000000000000000000000000000000000'
+PUBLISHER_CERTIFICATE_SHA256 = 'bf965f8369bbd9d8688ea31a3e87200f8752485a57e09f2d5599eb76947074a8'
 
 
 def run(*args, stderr=False):
