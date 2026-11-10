@@ -321,6 +321,9 @@ Future<T> connectTrustingServerCertificate<T>({
   try {
     return await attempt();
   } on UntrustedServerCertificate catch (error) {
+    // `attempt()` awaited above: the widget may be gone by now, and showing a
+    // dialog on a disposed context would throw. Nothing to trust without UI.
+    if (!context.mounted) rethrow;
     final trusted = await showUnknownCertificateDialog(
       context,
       server: base.toString(),
