@@ -447,8 +447,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   final server = TextEditingController(),
       email = TextEditingController(),
       password = TextEditingController(),
-      recovery = TextEditingController(),
-      invite = TextEditingController();
+      recovery = TextEditingController();
   late final TabController _tabs = TabController(
     length: 5,
     vsync: this,
@@ -499,7 +498,7 @@ class _SettingsPanelState extends State<SettingsPanel>
     appLanguage.removeListener(_languageChanged);
     _tabScroll.dispose();
     _tabs.dispose();
-    for (final c in [server, email, password, recovery, invite]) {
+    for (final c in [server, email, password, recovery]) {
       c.dispose();
     }
     super.dispose();
@@ -535,13 +534,11 @@ class _SettingsPanelState extends State<SettingsPanel>
         email.text,
         password.text,
         register: register,
-        invitation: invite.text,
         recoveryKey: recovery.text,
       ),
     );
     password.clear();
     recovery.clear();
-    invite.clear();
     if (key != null && mounted) await showRecovery(context, key);
     await repo.sync();
     await repo.refreshDevices();
@@ -1166,18 +1163,6 @@ class _SettingsPanelState extends State<SettingsPanel>
                             hintText: tr(
                               'Wymagany na nowym urządzeniu',
                               'Required on a new device',
-                            ),
-                          ),
-                        ),
-                      if (register)
-                        TextField(
-                          contextMenuBuilder: siliqueTextContextMenu,
-                          controller: invite,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: tr(
-                              'Zaproszenie (jeśli serwer go wymaga)',
-                              'Invitation (if required by the server)',
                             ),
                           ),
                         ),

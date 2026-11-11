@@ -319,8 +319,26 @@ class SiliqueApi implements SyncTransport {
         'The server returned error ${response.statusCode}',
       );
       try {
-        message =
-            (jsonDecode(response.body) as Json)['error'] as String? ?? message;
+        final decoded = jsonDecode(response.body) as Json;
+        message = decoded['error'] as String? ?? message;
+        // Fastify returns Zod issues under `details`. Without them a rejected
+        // field reads as a bare "Invalid request" and the user cannot tell
+        // which input the server refused.
+        final details = decoded['details'];
+        if (details is List && details.isNotEmpty) {
+          final issues = details
+              .whereType<Map>()
+              .map((issue) {
+                final path = issue['path'];
+                final field = path is List ? path.join('.') : '$path';
+                return field.isEmpty
+                    ? '${issue['message'] ?? ''}'
+                    : '$field: ${issue['message'] ?? ''}';
+              })
+              .where((line) => line.trim().isNotEmpty)
+              .join('; ');
+          if (issues.isNotEmpty) message = '$message ($issues)';
+        }
       } catch (_) {}
       throw _error(response, message);
     }

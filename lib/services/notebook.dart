@@ -1717,7 +1717,6 @@ class Notebook {
     String email,
     String password, {
     bool register = false,
-    String? invitation,
     String? recoveryKey,
   }) => _operation(
     () => _connect(
@@ -1725,7 +1724,6 @@ class Notebook {
       email,
       password,
       register: register,
-      invitation: invitation,
       recoveryKey: recoveryKey,
     ),
     failureKey: 'connect',
@@ -1735,7 +1733,6 @@ class Notebook {
     String email,
     String password, {
     bool register = false,
-    String? invitation,
     String? recoveryKey,
   }) async {
     final transport = SiliqueApi(server, trust: trust);
@@ -1767,7 +1764,10 @@ class Notebook {
           'password': password,
           'deviceId': deviceId,
           'deviceName': await deviceName(),
-          if (register && invitation != null) 'invite': invitation,
+          // No `invite` key: the server validates credentials with a strict
+          // schema (email/password/deviceId/deviceName) and rejects unknown
+          // keys, so an empty invitation field used to fail registration with
+          // a bare "Invalid request".
         },
       );
       transport.token = auth['token'] as String;
