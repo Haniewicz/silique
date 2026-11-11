@@ -1,7 +1,7 @@
 name: silique
 description: "Prywatne notatki Markdown. Offline-first, szyfrowane vaulty i synchronizacja E2EE."
 publish_to: 'none'
-version: 0.2.48+57
+version: 0.2.49+58
 
 environment:
   sdk: ^3.13.5
