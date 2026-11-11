@@ -288,6 +288,98 @@ void main() {
       expect(find.byType(AlertDialog), findsNothing);
     });
   });
+
+  group('guardServerTrust', () {
+    testWidgets(
+      'ServerCertificatePinMismatch is never masked and the pin is not overwritten',
+      (tester) async {
+        final store = _MemoryTrustStore();
+        final trust = ServerTrust(store: store);
+        final base = Uri.parse('https://notes.example.com');
+        // A confirmed pin already exists; a rotation must not rewrite it.
+        await store.write('https://notes.example.com', {'spki': _spkiA});
+
+        Object? caught;
+        await tester.pumpWidget(_app((context) => TextButton(
+          onPressed: () async {
+            try {
+              await guardServerTrust<String>(
+                context: context,
+                trust: trust,
+                base: base,
+                attempt: () async => throw ServerCertificatePinMismatch(
+                  expected: _spkiA,
+                  actual: _spkiB,
+                ),
+              );
+            } catch (e) {
+              caught = e;
+            }
+          },
+          child: const Text('Connect'),
+        )));
+        await tester.tap(find.text('Connect'));
+        await tester.pumpAndSettle();
+
+        // The mismatch dialog appeared…
+        expect(
+          find.textContaining('Certyfikat serwera się zmienił'),
+          findsOneWidget,
+        );
+        // …with no "trust anyway" escape hatch.
+        expect(find.byKey(const Key('server-trust-confirm')), findsNothing);
+        await tester.tap(find.byKey(const Key('server-trust-mismatch-close')));
+        await tester.pumpAndSettle();
+
+        // The error propagated to the caller after the dialog closed (not masked).
+        expect(caught, isA<ServerCertificatePinMismatch>());
+        // And the original pin survives untouched.
+        expect((await store.read('https://notes.example.com'))?['spki'], _spkiA);
+      },
+    );
+
+    testWidgets('UntrustedServerCertificate confirms and retries exactly once',
+        (tester) async {
+      final store = _MemoryTrustStore();
+      final trust = ServerTrust(store: store);
+      final base = Uri.parse('https://notes.example.com');
+      var attempts = 0;
+      var trusted = false;
+
+      await tester.pumpWidget(_app((context) => TextButton(
+        onPressed: () async {
+          trusted = await guardServerTrust<bool>(
+            context: context,
+            trust: trust,
+            base: base,
+            attempt: () async {
+              attempts++;
+              if (!await store.read(serverKeyOf(base)).then((r) => r != null)) {
+                throw UntrustedServerCertificate(
+                  spki: _spkiA,
+                  subject: 'CN=notes.example.com',
+                  notAfter: DateTime(2035),
+                );
+              }
+              return true;
+            },
+          );
+        },
+        child: const Text('Connect'),
+      )));
+      await tester.tap(find.text('Connect'));
+      await tester.pumpAndSettle();
+      expect(
+        find.textContaining('Nieznany certyfikat serwera'),
+        findsOneWidget,
+      );
+      await tester.tap(find.byKey(const Key('server-trust-confirm')));
+      await tester.pumpAndSettle();
+      expect(trusted, isTrue);
+      expect(attempts, 2);
+      expect((await store.read(serverKeyOf(base)))?['spki'], _spkiA);
+    });
+  });
 }
 
 bool? _lastResult;

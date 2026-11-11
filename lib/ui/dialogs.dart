@@ -481,14 +481,25 @@ class _SettingsPanelState extends State<SettingsPanel>
   set devices(List<Json>? value) => repo.devices = value;
   List<Json> pairingRequests = [];
   String? safetyCode;
+
+  /// The certificate of the current server that has been presented but is not
+  /// yet pinned, captured from the most recent [UntrustedServerCertificate].
+  /// When non-null the account tab renders an inline "trust this server" block
+  /// (with the SPKI fingerprint) instead of leaking the raw exception text.
+  CertInfo? _untrustedCert;
+
   Notebook get repo => widget.notebook;
+
+  /// The normalized base of the signed-in server, or null when signed out.
+  Uri? get _trustBase =>
+      repo.session == null ? null : SiliqueApi.validateServer(repo.session!.server);
   @override
   void initState() {
     super.initState();
     appLanguage.addListener(_languageChanged);
     server.text = repo.session?.server ?? '';
     email.text = repo.session?.email ?? '';
-    if (repo.session != null) unawaited(run(repo.refreshDevices));
+    if (repo.session != null) unawaited(refreshDevices());
   }
 
   void _languageChanged() => setState(() {});
@@ -520,6 +531,101 @@ class _SettingsPanelState extends State<SettingsPanel>
     }
   }
 
+  CertInfo _untrustedCertInfo(UntrustedServerCertificate error) => CertInfo(
+    spki: error.spki,
+    subject: error.subject,
+    san: error.san,
+    notAfter: error.notAfter,
+  );
+
+  /// Runs [action] through the shared server-trust guard, so every account-tab
+  /// request to the server can be confirmed from *any* path — not only login.
+  ///
+  /// `server_trust.dart` throws `ServerCertificatePinMismatch`/`Expired`, which
+  /// `guardServerTrust` surfaces with its dialogs and rethrows. An
+  /// `UntrustedServerCertificate` is handled inline: the fingerprint is captured
+  /// and the account tab shows its "Zaufaj temu serwerowi" block, so a raw
+  /// exception never reaches the `error` field. With no live UI (`!mounted`) the
+  /// error propagates instead, as required for the no-UI action case.
+  Future<void> _serverAction(Future<void> Function() action) async {
+    final base = _trustBase;
+    if (base == null) return action();
+    await guardServerTrust<void>(
+      context: context,
+      trust: repo.trust,
+      base: base,
+      attempt: () async {
+        try {
+          await action();
+        } on UntrustedServerCertificate catch (error) {
+          if (!mounted) rethrow;
+          setState(() => _untrustedCert = _untrustedCertInfo(error));
+        }
+      },
+    );
+  }
+
+  Future<void> refreshDevices() =>
+      run(() => _serverAction(() => repo.refreshDevices()));
+
+  /// Persists the pinned certificate for the current server and retries the
+  /// device/pairing refresh exactly once, matching the inline trust block.
+  Future<void> _trustServer() async {
+    final cert = _untrustedCert;
+    final base = _trustBase;
+    if (cert == null || base == null) return;
+    await repo.trust.confirm(base, cert);
+    if (mounted) setState(() => _untrustedCert = null);
+    await refreshDevices();
+    await refreshPairing();
+  }
+
+  /// Inline "no trust yet" block: shows the server's SPKI fingerprint and a
+  /// "Zaufaj temu serwerowi" action, so the certificate can be confirmed from
+  /// the account tab (any server-touching path) rather than only at login.
+  Widget _untrustedServerBlock() => Container(
+    padding: const EdgeInsets.all(16),
+    decoration: BoxDecoration(
+      color: sidebar,
+      border: Border.all(color: line),
+      borderRadius: BorderRadius.circular(10),
+    ),
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          tr('ODCISK KLUCZA (SPKI)', 'KEY FINGERPRINT (SPKI)'),
+          style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
+        ),
+        const SizedBox(height: 8),
+        SelectableText(
+          spkiDisplay(_untrustedCert!.spki),
+          key: const Key('account-trust-spki'),
+          contextMenuBuilder: siliqueTextContextMenu,
+          style: const TextStyle(
+            fontFamily: kMonoFontFamily,
+            fontFamilyFallback: ['monospace'],
+            fontSize: 13,
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          tr(
+            'Silique nie może potwierdzić tożsamości tego serwera. Zweryfikuj odcisk i zaufaj serwerowi, aby odświeżyć listę urządzeń.',
+            'Silique cannot confirm the identity of this server. Verify the fingerprint and trust the server to refresh the device list.',
+          ),
+          style: const TextStyle(color: muted, fontSize: 12),
+        ),
+        const SizedBox(height: 12),
+        FilledButton(
+          key: const Key('account-trust-server'),
+          onPressed: busy ? null : _trustServer,
+          child: Text(tr('Zaufaj temu serwerowi', 'Trust this server')),
+        ),
+      ],
+    ),
+  );
+
   Future<void> connect() => run(() async {
     // A self-signed server must be confirmable instead of fatal: the pin is
     // stored once, the attempt is retried exactly once, and every later
@@ -540,8 +646,8 @@ class _SettingsPanelState extends State<SettingsPanel>
     password.clear();
     recovery.clear();
     if (key != null && mounted) await showRecovery(context, key);
-    await repo.sync();
-    await repo.refreshDevices();
+    await _serverAction(() => repo.sync());
+    await _serverAction(() => repo.refreshDevices());
     if (mounted) {
       final keysLocked = repo.accountKey == null;
       setState(
@@ -557,7 +663,7 @@ class _SettingsPanelState extends State<SettingsPanel>
       );
     }
   });
-  Future<void> refreshPairing() => run(() async {
+  Future<void> refreshPairing() => run(() => _serverAction(() async {
     pairingRequests = await repo.pairings();
     if (repo.accountKey == null) {
       final own = pairingRequests
@@ -575,8 +681,8 @@ class _SettingsPanelState extends State<SettingsPanel>
         }
       }
     }
-  });
-  Future<void> approve(Json request) => run(() async {
+  }));
+  Future<void> approve(Json request) => run(() => _serverAction(() async {
     final offered = request['approverId'] == null
         ? await repo.offerPairing(request)
         : request;
@@ -656,7 +762,7 @@ class _SettingsPanelState extends State<SettingsPanel>
         'Key sent in an encrypted envelope. Refresh pairing on the new device.',
       );
     }
-  });
+  }));
   Widget pairingSection() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -700,7 +806,7 @@ class _SettingsPanelState extends State<SettingsPanel>
             ),
           ),
         TextButton(
-          onPressed: busy ? null : () => run(repo.startPairing),
+          onPressed: busy ? null : () => run(() => _serverAction(repo.startPairing)),
           child: Text(
             tr(
               'Rozpocznij parowanie ponownie (ważne 10 minut)',
@@ -723,12 +829,12 @@ class _SettingsPanelState extends State<SettingsPanel>
         TextButton(
           onPressed: busy
               ? null
-              : () => run(() async {
+              : () => run(() => _serverAction(() async {
                   await repo.recoverAccount(recovery.text);
                   recovery.clear();
                   await repo.sync();
                   message = () => tr('Konto odblokowane.', 'Account unlocked.');
-                }),
+                })),
           child: Text(
             tr('Odblokuj kluczem odzyskiwania', 'Unlock with recovery key'),
           ),
@@ -1232,10 +1338,15 @@ class _SettingsPanelState extends State<SettingsPanel>
                             : () => run(() async {
                                 await repo.disconnect();
                                 devices = null;
+                                _untrustedCert = null;
                               }),
                         icon: const Icon(Icons.logout, size: 17),
                         label: Text(tr('Wyloguj konto', 'Sign out')),
                       ),
+                      if (_untrustedCert != null) ...[
+                        const SizedBox(height: 12),
+                        _untrustedServerBlock(),
+                      ],
                       pairingSection(),
                       const SizedBox(height: 20),
                       Text(
@@ -1256,7 +1367,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                   v.owner != null &&
                                       v.owner != repo.session!.owner
                               ? null
-                              : (enabled) => run(() async {
+                              : (enabled) => run(() => _serverAction(() async {
                                   if (enabled) {
                                     await repo.enableSync(v);
                                     await repo.sync();
@@ -1264,7 +1375,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                     v.syncEnabled = false;
                                     repo.storage.putVault(v);
                                   }
-                                }),
+                                })),
                           title: Text(
                             v.name,
                             style: const TextStyle(fontSize: 14),
@@ -1298,9 +1409,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                           TextButton(
                             onPressed: busy
                                 ? null
-                                : () => run(() async {
-                                    await repo.refreshDevices();
-                                  }),
+                                : () => run(() => _serverAction(repo.refreshDevices)),
                             child: Text(tr('Odśwież', 'Refresh')),
                           ),
                         ],
@@ -1352,7 +1461,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                               ),
                                             );
                                             if (name == null) return;
-                                            await run(() async {
+                                            await run(() => _serverAction(() async {
                                               final saved = await repo
                                                   .renameDevice(
                                                     device['id'] as String,
@@ -1363,7 +1472,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                                 'Nazwa urządzenia zapisana na serwerze: $saved',
                                                 'Device name saved on the server: $saved',
                                               );
-                                            });
+                                            }));
                                           },
                                   ),
                                 if (device['revoked'] != 1)
@@ -1375,7 +1484,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                     icon: const Icon(Icons.block, size: 18),
                                     onPressed: busy
                                         ? null
-                                        : () => run(() async {
+                                        : () => run(() => _serverAction(() async {
                                             final confirmed = await showDialog<bool>(
                                               context: context,
                                               builder: (ctx) => ListenableBuilder(
@@ -1438,7 +1547,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                                                   )
                                                   .toList();
                                             }
-                                          }),
+                                          })),
                                   ),
                               ],
                             ),

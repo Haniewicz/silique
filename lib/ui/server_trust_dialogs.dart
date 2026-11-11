@@ -337,6 +337,33 @@ Future<T> connectTrustingServerCertificate<T>({
   required ServerTrust trust,
   required Uri base,
   required Future<T> Function() attempt,
+}) => guardServerTrust(
+  context: context,
+  trust: trust,
+  base: base,
+  attempt: attempt,
+);
+
+/// Wraps any server [attempt] with the shared certificate-trust guard, so that
+/// a self-signed server can be confirmed from *every* code path that talks to
+/// it — not only the login flow.
+///
+/// Behavior:
+///  * `UntrustedServerCertificate` → fingerprint dialog (hex via [spkiDisplay],
+///    never base64); on consent `trust.confirm(base, …)` then exactly ONE retry.
+///    When [context] is no longer mounted (an action without live UI) the error
+///    propagates unusurped; otherwise the user gets a dialog, never raw text.
+///  * `ServerCertificatePinMismatch` / `ServerCertificateExpired` → the matching
+///    dialog, then rethrow (never masked, never rewriting the pin).
+///
+/// [onTrusted] runs after the pin is persisted and before the single retry, so a
+/// caller can refresh its "no trust yet" presentation or record the event.
+Future<T> guardServerTrust<T>({
+  required BuildContext context,
+  required ServerTrust trust,
+  required Uri base,
+  required Future<T> Function() attempt,
+  VoidCallback? onTrusted,
 }) async {
   try {
     return await attempt();
@@ -359,6 +386,7 @@ Future<T> connectTrustingServerCertificate<T>({
         notAfter: error.notAfter,
       ),
     );
+    onTrusted?.call();
     return attempt();
   } on ServerCertificatePinMismatch catch (error) {
     await showPinMismatchDialog(context, server: base.toString(), error: error);
