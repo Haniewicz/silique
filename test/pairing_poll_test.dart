@@ -471,4 +471,134 @@ void main() {
       await tester.pump(const Duration(milliseconds: 500));
     },
   );
+
+  testWidgets(
+    'a silent poll never blocks the UI and keeps the status message',
+    (tester) async {
+      final (repo, api) = await _setup(tester);
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        repo.api?.close();
+        await repo.storage.close();
+      });
+      await tester.binding.setSurfaceSize(const Size(1100, 1000));
+      addTearDown(() => tester.binding.setSurfaceSize(null));
+      await tester.runAsync(() async {
+        await repo.keys.write('nova.deviceName', 'Testowe urzadzenie');
+      });
+
+      // Drive a full pairing so a success message is on screen; the poll must
+      // neither replace it nor take the UI busy while it keeps running.
+      final own = await _ownPair(tester, repo);
+      api.onRequest = (method, path, body) async {
+        if (path == '/v1/devices') {
+          return {
+            'devices': [
+              {'id': repo.deviceId, 'name': 'Ten komputer', 'revoked': 0},
+            ],
+          };
+        }
+        if (path == '/v1/pairings') return {'pairings': [own]};
+        if (path == '/v1/vaults') {
+          return {'vaults': <Object>[], 'deletedVaults': <Object>[]};
+        }
+        return <String, dynamic>{};
+      };
+      await _mountAccount(tester, repo);
+      await _pumpUntil(
+        tester,
+        () => find
+            .text('Porównaj ten kod na obu urządzeniach:')
+            .evaluate()
+            .isNotEmpty,
+      );
+      final details = (await tester.runAsync(() => repo.pairingDetails(own)))!;
+      own['envelope'] = await tester.runAsync(
+        () => repo.crypto.seal(
+          details.key,
+          base64Encode(repo.crypto.randomKey()),
+          details.context,
+        ),
+      );
+      await _pumpUntil(
+        tester,
+        () => find
+            .textContaining('Notatki są odblokowane')
+            .evaluate()
+            .isNotEmpty,
+      );
+
+      final before = api.requests.length;
+      await _pumpUntil(
+        tester,
+        () => api.requests.length >= before + 8,
+        maxFrames: 600,
+      );
+
+      // The message survived every poll cycle, the manual refresh stays usable
+      // (busy is false, never a spinner) and no error text was produced.
+      expect(find.textContaining('Notatki są odblokowane'), findsOneWidget);
+      final refresh = tester.widget<TextButton>(
+        find.widgetWithText(TextButton, 'Odśwież parowanie'),
+      );
+      expect(refresh.onPressed, isNotNull);
+      expect(find.byType(LinearProgressIndicator), findsNothing);
+      expect(find.textContaining('Exception'), findsNothing);
+    },
+  );
+
+  testWidgets('the poll surfaces an error only after three failed cycles', (
+    tester,
+  ) async {
+    final (repo, api) = await _setup(tester);
+    addTearDown(() async {
+      await tester.pumpWidget(const SizedBox());
+      repo.api?.close();
+      await repo.storage.close();
+    });
+    await tester.binding.setSurfaceSize(const Size(1100, 1000));
+    addTearDown(() => tester.binding.setSurfaceSize(null));
+
+    api.onRequest = (method, path, body) async {
+      if (path == '/v1/pairings') throw Exception('poll-boom');
+      if (path == '/v1/devices') {
+        return {
+          'devices': [
+            {'id': repo.deviceId, 'name': 'Ten komputer', 'revoked': 0},
+          ],
+        };
+      }
+      if (path == '/v1/vaults') {
+        return {'vaults': <Object>[], 'deletedVaults': <Object>[]};
+      }
+      return <String, dynamic>{};
+    };
+
+    int pairingsCalls() =>
+        api.requests.where((r) => r == 'GET /v1/pairings').length;
+
+    // A slow interval keeps the cycle count controllable: the bounded pump
+    // steps 25 ms, so 200 ms per tick means one call per observation.
+    await _mountAccount(
+      tester,
+      repo,
+      pollInterval: const Duration(milliseconds: 200),
+    );
+    // One or two failed cycles: the error stays hidden (no flapping banner).
+    await _pumpUntil(tester, () => pairingsCalls() >= 1);
+    expect(find.textContaining('poll-boom'), findsNothing);
+    await _pumpUntil(tester, () => pairingsCalls() >= 2);
+    expect(find.textContaining('poll-boom'), findsNothing);
+    // The third consecutive failure is surfaced.
+    await _pumpUntil(tester, () => pairingsCalls() >= 3);
+    await _pumpUntil(
+      tester,
+      () => find.textContaining('poll-boom').evaluate().isNotEmpty,
+      maxFrames: 600,
+    );
+    expect(find.textContaining('poll-boom'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    await tester.pump(const Duration(milliseconds: 500));
+  });
 }
