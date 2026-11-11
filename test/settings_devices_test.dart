@@ -72,7 +72,13 @@ void main() {
           home: Scaffold(
             body: Center(
               child: Dialog(
-                child: SettingsPanel(notebook: repo, onChanged: () {}),
+                child: SettingsPanel(
+                  notebook: repo,
+                  onChanged: () {},
+                  // This test asserts exact request counts for the revocation
+                  // flow; the automatic polling is covered elsewhere.
+                  pollInterval: const Duration(days: 1),
+                ),
               ),
             ),
           ),

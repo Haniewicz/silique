@@ -410,6 +410,7 @@ class SettingsPanel extends StatefulWidget {
     this.openUpdates = false,
     this.serverTrust,
     this.serverBase,
+    this.pollInterval = const Duration(seconds: 2),
   });
   final Notebook notebook;
   final VoidCallback onChanged;
@@ -427,6 +428,10 @@ class SettingsPanel extends StatefulWidget {
   final VoidCallback? onMoveStorage;
   final AppUpdater? updater;
   final Future<void> Function()? beforeUpdate;
+
+  /// Interval between the silent account-tab poll cycles (`pairings()` +
+  /// `refreshDevices()`). Tests shrink this to 20–50 ms; production uses 2 s.
+  final Duration pollInterval;
 
   /// Open the dialog directly on the updates tab, so the update snackbar
   /// action never leaves the user searching the settings.
@@ -482,6 +487,18 @@ class _SettingsPanelState extends State<SettingsPanel>
   List<Json> pairingRequests = [];
   String? safetyCode;
 
+  /// Silent account-tab polling. [pollInterval] drives [Timer] ticks; [_polling]
+  /// guarantees no two runs overlap, [_pollFailures] defers surfacing a failure
+  /// until three consecutive failures, and [_pairingStarted]/[_pairingComplete]
+  /// guard the new-device pairing state machine so `startPairing` fires once per
+  /// absence and pairing polling stops after the envelope is consumed.
+  Timer? _pollTimer;
+  bool _polling = false;
+  int _pollFailures = 0;
+  bool _pairingStarted = false;
+  bool _finishingPairing = false;
+  bool _pairingComplete = false;
+
   /// The certificate of the current server that has been presented but is not
   /// yet pinned, captured from the most recent [UntrustedServerCertificate].
   /// When non-null the account tab renders an inline "trust this server" block
@@ -500,12 +517,14 @@ class _SettingsPanelState extends State<SettingsPanel>
     server.text = repo.session?.server ?? '';
     email.text = repo.session?.email ?? '';
     if (repo.session != null) unawaited(refreshDevices());
+    _pollTimer = Timer.periodic(widget.pollInterval, (_) => unawaited(_poll()));
   }
 
   void _languageChanged() => setState(() {});
 
   @override
   void dispose() {
+    _pollTimer?.cancel();
     appLanguage.removeListener(_languageChanged);
     _tabScroll.dispose();
     _tabs.dispose();
@@ -576,7 +595,9 @@ class _SettingsPanelState extends State<SettingsPanel>
     if (cert == null || base == null) return;
     await repo.trust.confirm(base, cert);
     if (mounted) setState(() => _untrustedCert = null);
-    await refreshDevices();
+    // One retry: refreshPairing already refreshes the device list, so calling
+    // refreshDevices first would issue a duplicate GET /v1/devices (and make
+    // the "exactly one retry" contract in the tests untrue).
     await refreshPairing();
   }
 
@@ -665,23 +686,88 @@ class _SettingsPanelState extends State<SettingsPanel>
   });
   Future<void> refreshPairing() => run(() => _serverAction(() async {
     pairingRequests = await repo.pairings();
-    if (repo.accountKey == null) {
-      final own = pairingRequests
-          .where((p) => p['requesterId'] == repo.deviceId)
-          .firstOrNull;
-      if (own != null && own['approverKey'] != null) {
-        safetyCode = (await repo.pairingDetails(own)).code;
-        if (await repo.finishPairing(own)) {
+    await repo.refreshDevices();
+    await _processPairing();
+  }));
+
+  /// The new-device pairing state machine, shared by the silent poll and the
+  /// manual "Odśwież parowanie" fallback (and the reverse device-only refresh).
+  ///
+  /// A device that has not yet received its account key drives everything itself:
+  ///  * no live own pairing row (never created, or since expired server-side) →
+  ///    `startPairing()` once, guarded by [_pairingStarted] so a 2 s poll never
+  ///    restarts it in a loop;
+  ///  * own row has `approverKey` and no `envelope` → the comparison code is
+  ///    derived and shown without any tap;
+  ///  * own row has an `envelope` → `finishPairing()` + `sync()` once, then the
+  ///    success message and pairing polling stops.
+  ///
+  /// The consent-dialog POST (`approvePairing`) is never reachable from here:
+  /// auto-completion happens only on the requesting device after the server
+  /// returns the envelope sealed by a human's approval on the key-holding device.
+  Future<void> _processPairing() async {
+    if (repo.accountKey != null || _pairingComplete || _finishingPairing) {
+      return;
+    }
+    final own = pairingRequests
+        .where((p) => p['requesterId'] == repo.deviceId)
+        .firstOrNull;
+    if (own == null) {
+      if (!_pairingStarted) {
+        _pairingStarted = true;
+        await repo.startPairing();
+      }
+      return;
+    }
+    _pairingStarted = false;
+    if (own['envelope'] != null) {
+      _finishingPairing = true;
+      try {
+        final finished = await repo.finishPairing(own);
+        if (finished) {
           await repo.sync();
+          safetyCode = null;
+          _pairingComplete = true;
           message = () => tr(
             'Urządzenie sparowane. Notatki są odblokowane.',
             'Device paired. Notes are unlocked.',
           );
-          safetyCode = null;
         }
+      } finally {
+        _finishingPairing = false;
       }
+      return;
     }
-  }));
+    if (own['approverKey'] != null) {
+      safetyCode = (await repo.pairingDetails(own)).code;
+    }
+  }
+
+  /// One silent poll cycle. It never sets [busy] (no spinner, no button lock),
+  /// never touches [message], and surfaces [error] only after three consecutive
+  /// failures. `UntrustedServerCertificate` is routed to the inline trust block
+  /// by [_serverAction] and never reaches [error]/[message] as text.
+  Future<void> _poll() async {
+    if (_polling || busy || !mounted || repo.session == null) return;
+    _polling = true;
+    try {
+      await _serverAction(() async {
+        pairingRequests = await repo.pairings();
+        await repo.refreshDevices();
+        await _processPairing();
+      });
+      _pollFailures = 0;
+      if (mounted) setState(() {});
+    } catch (e) {
+      _pollFailures++;
+      if (_pollFailures >= 3 && mounted) {
+        setState(() => error = '$e');
+      }
+    } finally {
+      _polling = false;
+    }
+  }
+
   Future<void> approve(Json request) => run(() => _serverAction(() async {
     final offered = request['approverId'] == null
         ? await repo.offerPairing(request)
@@ -710,8 +796,8 @@ class _SettingsPanelState extends State<SettingsPanel>
                 children: [
                   Text(
                     tr(
-                      'Na nowym urządzeniu naciśnij „Odśwież parowanie”. Oba urządzenia muszą wyświetlać dokładnie ten sam pełny kod. Dopiero wtedy udostępnij klucz konta.',
-                      'Press “Refresh pairing” on the new device. Both devices must display exactly the same full code. Only then share the account key.',
+                      'Nowe urządzenie pokazuje ten sam kod automatycznie. Oba urządzenia muszą wyświetlać dokładnie ten sam pełny kod. Dopiero wtedy udostępnij klucz konta.',
+                      'The new device shows the same code automatically. Both devices must display exactly the same full code. Only then share the account key.',
                     ),
                   ),
                   const SizedBox(height: 20),
@@ -758,8 +844,8 @@ class _SettingsPanelState extends State<SettingsPanel>
     if (confirmed == true) {
       await repo.approvePairing(offered);
       message = () => tr(
-        'Klucz przekazany w zaszyfrowanej kopercie. Odśwież parowanie na nowym urządzeniu.',
-        'Key sent in an encrypted envelope. Refresh pairing on the new device.',
+        'Klucz przekazany w zaszyfrowanej kopercie. Nowe urządzenie dokończy parowanie automatycznie.',
+        'Key sent in an encrypted envelope. The new device will finish pairing automatically.',
       );
     }
   }));
@@ -786,14 +872,24 @@ class _SettingsPanelState extends State<SettingsPanel>
       if (repo.accountKey == null) ...[
         Text(
           tr(
-            'Na odblokowanym urządzeniu otwórz Ustawienia → Parowanie urządzeń, odśwież listę i wybierz to urządzenie.',
-            'On an unlocked device, open Settings → Device pairing, refresh the list and select this device.',
+            'Na odblokowanym urządzeniu otwórz Ustawienia → Parowanie urządzeń i wybierz to urządzenie.',
+            'On an unlocked device, open Settings → Device pairing and select this device.',
           ),
           style: TextStyle(color: muted, fontSize: 12),
         ),
-        if (safetyCode != null)
+        if (safetyCode != null) ...[
           Padding(
-            padding: const EdgeInsets.symmetric(vertical: 16),
+            padding: const EdgeInsets.only(top: 16),
+            child: Text(
+              tr(
+                'Porównaj ten kod na obu urządzeniach:',
+                'Compare this code on both devices:',
+              ),
+              style: TextStyle(color: muted, fontSize: 12),
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 8),
             child: SelectableText(
               safetyCode!,
               contextMenuBuilder: siliqueTextContextMenu,
@@ -805,6 +901,7 @@ class _SettingsPanelState extends State<SettingsPanel>
               ),
             ),
           ),
+        ],
         TextButton(
           onPressed: busy ? null : () => run(() => _serverAction(repo.startPairing)),
           child: Text(

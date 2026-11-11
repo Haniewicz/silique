@@ -102,7 +102,13 @@ Future<void> _mountAccount(
         body: Center(
           child: Dialog(
             insetPadding: const EdgeInsets.all(16),
-            child: SettingsPanel(notebook: repo, onChanged: () {}),
+            child: SettingsPanel(
+              notebook: repo,
+              onChanged: () {},
+              // This test asserts exact device-request counts for the trust
+              // flow; the automatic polling is covered by pairing_poll_test.
+              pollInterval: const Duration(days: 1),
+            ),
           ),
         ),
       ),
