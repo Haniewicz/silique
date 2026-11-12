@@ -131,16 +131,16 @@ object WidgetRenderer {
 }
 
 class NoteListWidget : AppWidgetProvider() {
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.list(context, it)) } }
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.list(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
 }
 class NewNoteWidget : AppWidgetProvider() {
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.newNote(context, it)) } }
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.newNote(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
 }
 class SearchWidget : AppWidgetProvider() {
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.search(context, it)) } }
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.search(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
 }
 class JournalWidget : AppWidgetProvider() {
-    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.journal(context, it)) } }
+    override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.journal(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
 }
 class NotesRemoteViewsService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = Factory(applicationContext)

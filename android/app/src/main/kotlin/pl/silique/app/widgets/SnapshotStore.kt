@@ -26,6 +26,14 @@ class SnapshotStore(context: Context, private val keyProvider: () -> SecretKey =
         } catch (error: Exception) { atomic.failWrite(stream); throw error }
     }
     fun read(): WidgetSnapshot = synchronized(lock) {
+        // Resolve the key first and independently: a transiently unavailable key
+        // (credential-encrypted Keystore still locked before first unlock) must
+        // never destroy the only encrypted copy of the snapshot.
+        val key = try {
+            keyProvider()
+        } catch (_: Exception) {
+            return@synchronized WidgetSnapshot()
+        }
         try {
             val bytes = atomic.openRead().use { stream ->
                 require(stream.available() <= 32 * 1024 * 1024)
@@ -33,10 +41,19 @@ class SnapshotStore(context: Context, private val keyProvider: () -> SecretKey =
             }
             require(bytes.size >= 29 && bytes[0] == 1.toByte())
             val cipher = Cipher.getInstance("AES/GCM/NoPadding")
-            cipher.init(Cipher.DECRYPT_MODE, keyProvider(), GCMParameterSpec(128, bytes.copyOfRange(1, 13)))
+            cipher.init(Cipher.DECRYPT_MODE, key, GCMParameterSpec(128, bytes.copyOfRange(1, 13)))
             cipher.updateAAD(aad)
             WidgetSnapshot.decode(cipher.doFinal(bytes.copyOfRange(13, bytes.size)))
-        } catch (_: Exception) { atomic.delete(); WidgetSnapshot() }
+        } catch (_: java.io.IOException) {
+            // Transient I/O (file absent mid-write, storage briefly unavailable):
+            // keep whatever is on disk, report empty.
+            WidgetSnapshot()
+        } catch (_: Exception) {
+            // Real corruption (bad GCM tag with a usable key, malformed payload,
+            // oversized framing): the data is unrecoverable, drop it.
+            atomic.delete()
+            WidgetSnapshot()
+        }
     }
     fun clear() = synchronized(lock) { atomic.delete() }
     fun removeVault(id: String) = synchronized(lock) {

@@ -58,4 +58,21 @@ class SnapshotStoreTest {
         assertFalse(store.file.exists())
         assertTrue(store.read().notes.isEmpty())
     }
+
+    @Test fun transientKeystoreFailureKeepsSnapshotFileForLaterRecovery() {
+        val store = SnapshotStore(context) { key }
+        store.write(snapshot)
+        assertTrue(store.file.exists())
+        // A transiently unavailable key provider must not destroy the only copy.
+        WidgetRuntime.storeFactory = { SnapshotStore(it) { throw IllegalStateException("keystore locked") } }
+        try {
+            val lockedStore = WidgetRuntime.store(context)
+            assertTrue(lockedStore.read().notes.isEmpty())
+            assertTrue("Snapshot must survive a transient Keystore outage", store.file.exists())
+        } finally {
+            WidgetRuntime.storeFactory = { SnapshotStore(it) }
+        }
+        // Once the key is reachable again, the previously written notes come back.
+        assertEquals(snapshot, SnapshotStore(context) { key }.read())
+    }
 }
