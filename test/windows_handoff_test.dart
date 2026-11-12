@@ -3,6 +3,7 @@ import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:silique/services/windows_update_handoff.dart';
+import 'package:silique/core/server_trust.dart';
 import 'package:silique/storage/startup_notebook.dart';
 
 import 'update_quiescence_test.dart' show Keys;
@@ -15,7 +16,7 @@ void main() {
         'silique-handoff-failure-',
       );
       addTearDown(() => dir.deleteSync(recursive: true));
-      final repo = await openStartupNotebook(dir.path, keys: Keys());
+      final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
       final blocked = <bool>[];
       await expectLater(
         PreparedWindowsUpdate.prepare(
@@ -43,7 +44,7 @@ void main() {
   test('failed postlaunch close keeps admission and input fenced across abort and close retry', () async {
     final dir = Directory.systemTemp.createTempSync('silique-handoff-close-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final repo = await openStartupNotebook(dir.path, keys: Keys());
+    final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
     addTearDown(repo.close);
     final blocked = <bool>[];
     var closes = 0;
@@ -74,7 +75,7 @@ void main() {
         'silique-handoff-sync-close-',
       );
       addTearDown(() => dir.deleteSync(recursive: true));
-      final repo = await openStartupNotebook(dir.path, keys: Keys());
+      final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
       addTearDown(repo.close);
       final blocked = <bool>[];
       var closes = 0;
@@ -102,7 +103,7 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('silique-handoff-flush-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final keys = Keys();
-      final repo = await openStartupNotebook(dir.path, keys: keys);
+      final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       await repo.createVault('Synthetic');
       final note = await repo.createNote(repo.vaults.single.id);
       final entered = Completer<void>(), release = Completer<void>();
@@ -125,7 +126,7 @@ void main() {
       expect(repo.notes[note.vaultId]![note.id]!.body, 'last editor flush');
       await handoff.abort();
       await repo.close();
-      final reopened = await openStartupNotebook(dir.path, keys: keys);
+      final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       expect(reopened.notes[note.vaultId]![note.id]!.body, 'last editor flush');
       await reopened.close();
     },
@@ -135,7 +136,7 @@ void main() {
     () async {
       final dir = Directory.systemTemp.createTempSync('silique-handoff-race-');
       addTearDown(() => dir.deleteSync(recursive: true));
-      final repo = await openStartupNotebook(dir.path, keys: Keys());
+      final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
       final release = Completer<void>();
       final handoff = await PreparedWindowsUpdate.prepare(
         notebook: repo,
@@ -164,7 +165,7 @@ void main() {
         'silique-handoff-commit-',
       );
       addTearDown(() => dir.deleteSync(recursive: true));
-      final repo = await openStartupNotebook(dir.path, keys: Keys());
+      final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
       var closed = 0;
       final handoff = await PreparedWindowsUpdate.prepare(
         notebook: repo,
@@ -185,7 +186,7 @@ void main() {
   test('handoff blocks input, performs full close preparation and restores writes on cancellation', () async {
     final dir = Directory.systemTemp.createTempSync('silique-handoff-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final repo = await openStartupNotebook(dir.path, keys: Keys());
+    final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
     await repo.createVault('Keep');
     final events = <String>[];
     final handoff = await PreparedWindowsUpdate.prepare(

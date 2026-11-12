@@ -10,6 +10,7 @@ import 'package:http/testing.dart';
 import 'package:silique/core/updates.dart';
 import 'package:silique/services/app_updates.dart';
 import 'package:silique/services/windows_update_handoff.dart';
+import 'package:silique/core/server_trust.dart';
 import 'package:silique/storage/startup_notebook.dart';
 
 import 'update_quiescence_test.dart' show Keys;
@@ -138,6 +139,7 @@ void main() {
         final repo = await openStartupNotebook(
           f.installer.directory,
           keys: Keys(),
+          trustStore: InMemoryTrustStore(),
         );
         addTearDown(repo.close);
         final blocked = <bool>[];

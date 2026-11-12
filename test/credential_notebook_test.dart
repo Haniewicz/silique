@@ -7,6 +7,7 @@ import 'package:silique/services/notebook.dart';
 import 'package:silique/storage/credential_files.dart';
 import 'package:silique/storage/credential_startup.dart';
 import 'package:silique/storage/managed_keys.dart';
+import 'package:silique/core/server_trust.dart';
 import 'package:silique/storage/startup_notebook.dart';
 
 class _SystemKeys implements SystemCredentialBackend {
@@ -74,7 +75,7 @@ void main() {
       temporary.deleteSync(recursive: true);
     });
     await keys.initialize(firstRunMode: CredentialMode.local);
-    notebook = await openStartupNotebook(root, keys: keys);
+    notebook = await openStartupNotebook(root, keys: keys, trustStore: InMemoryTrustStore());
     await notebook.createVault('Synthetic ordinary vault');
     final vaultId = notebook.vaults.single.id;
     final note = await notebook.createNote(vaultId);
@@ -119,7 +120,7 @@ void main() {
           .read(ManagedKeys.localFile),
       originalLocal,
     );
-    notebook = await openStartupNotebook(root, keys: keys);
+    notebook = await openStartupNotebook(root, keys: keys, trustStore: InMemoryTrustStore());
     expect(
       system.calls,
       initialSystemCalls,
@@ -157,7 +158,7 @@ void main() {
     notebook = null;
     keys = make();
     await keys.initialize(requireExistingKey: true);
-    notebook = await openStartupNotebook(root, keys: keys);
+    notebook = await openStartupNotebook(root, keys: keys, trustStore: InMemoryTrustStore());
     expect(keys.mode, CredentialMode.system);
     expect(notebook.notes[vaultId]![note.id]!.title, 'Synthetic note');
     expect(notebook.hiddenUnlocked, isFalse);

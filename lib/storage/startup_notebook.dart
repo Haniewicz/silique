@@ -14,6 +14,7 @@ Future<Notebook> openStartupNotebook(
   required KeyStore keys,
   String? applicationSupport,
   StorageRootExpectation? expectedRoot,
+  ServerTrustStore? trustStore,
 }) async {
   final expectation =
       expectedRoot ??
@@ -29,17 +30,18 @@ Future<Notebook> openStartupNotebook(
   // index needs a write. Diagnosing the folder keeps the message honest.
   NativeStorage.verifyRootWritable(root);
   // Pins live beside the app's own support files, not in the vault, so they are
-  // readable before unlock. Without a known location the store stays in memory
-  // and the pin only lasts for this run — pinning must never be silently off.
-  final trust = ServerTrust(
-    store: applicationSupport == null
-        ? InMemoryTrustStore()
-        : FileTrustStore(
-            File(
-              '$applicationSupport${Platform.pathSeparator}server-trust.json',
-            ),
-          ),
-  );
+  // readable before unlock. When no support directory was passed it is resolved
+  // here, so a confirmed pin survives a process restart. The in-memory store is
+  // test-only and must be requested explicitly via [trustStore].
+  final store = trustStore ??
+      (applicationSupport == null
+          ? await FileTrustStore.inApplicationSupport()
+          : FileTrustStore(
+              File(
+                '$applicationSupport${Platform.pathSeparator}server-trust.json',
+              ),
+            ));
+  final trust = ServerTrust(store: store);
   final notebook = Notebook(
     storage: NativeStorage(root),
     keys: keys,

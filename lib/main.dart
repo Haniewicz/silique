@@ -253,7 +253,7 @@ Future<void> _openAndRun(
     policy,
     onContinue: () => _openAndRun(
       root,
-      applicationSupport: applicationSupport,
+      applicationSupport: support.path,
       expectedRoot: expectedRoot,
     ),
   );
@@ -264,7 +264,7 @@ Future<void> _openAndRun(
   final notebook = await openStartupNotebook(
     root,
     keys: keys,
-    applicationSupport: applicationSupport,
+    applicationSupport: support.path,
     expectedRoot: expectedRoot,
   );
   runApp(

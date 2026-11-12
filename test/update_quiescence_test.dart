@@ -13,6 +13,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:sqlite3/sqlite3.dart' hide Session;
 import 'package:silique/storage/native_storage.dart';
 import 'package:silique/core/contracts.dart';
+import 'package:silique/core/server_trust.dart';
 import 'package:silique/storage/startup_notebook.dart';
 import 'package:silique/storage/native_crypto.dart';
 import 'package:silique/storage/managed_keys.dart';
@@ -128,7 +129,7 @@ void main() {
         'silique-update-flush-retry-',
       );
       addTearDown(() => dir.deleteSync(recursive: true));
-      final repo = await openStartupNotebook(dir.path, keys: Keys());
+      final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
       await repo.createVault('Synthetic');
       final note = await repo.createNote(repo.vaults.single.id);
       final storage = repo.storage as NativeStorage;
@@ -187,7 +188,7 @@ void main() {
     final keys = make();
     await keys.initialize(firstRunMode: CredentialMode.system);
     final root = '${dir.path}/notebook';
-    final repo = await openStartupNotebook(root, keys: keys);
+    final repo = await openStartupNotebook(root, keys: keys, trustStore: InMemoryTrustStore());
     await repo.createVault('Synthetic');
     final note = await repo.createNote(repo.vaults.single.id);
     await repo.save(note.copyWith(body: 'ordinary disk sentinel'));
@@ -214,7 +215,7 @@ void main() {
     final freshKeys = make();
     await freshKeys.initialize(requireExistingKey: true);
     expect(freshKeys.mode, CredentialMode.local);
-    final reopened = await openStartupNotebook(root, keys: freshKeys);
+    final reopened = await openStartupNotebook(root, keys: freshKeys, trustStore: InMemoryTrustStore());
     expect(await freshKeys.read('nova.localKey'), expected['nova.localKey']);
     expect(
       reopened.notes[note.vaultId]![note.id]!.body,
@@ -295,7 +296,7 @@ void main() {
         'silique-update-metadata-retry-',
       );
       addTearDown(() => dir.deleteSync(recursive: true));
-      final repo = await openStartupNotebook(dir.path, keys: Keys());
+      final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
       await repo.createVault('Synthetic');
       final vault = repo.vaults.single;
       final storage = repo.storage as NativeStorage;
@@ -314,7 +315,7 @@ void main() {
   test('prepare drains a sync accepted during its async preflight', () async {
     final dir = Directory.systemTemp.createTempSync('silique-update-sync-');
     addTearDown(() => dir.deleteSync(recursive: true));
-    final repo = await openStartupNotebook(dir.path, keys: Keys());
+    final repo = await openStartupNotebook(dir.path, keys: Keys(), trustStore: InMemoryTrustStore());
     repo.session = Session(
       server: 'https://synthetic.invalid',
       token: 'fixture',
@@ -375,7 +376,7 @@ void main() {
       final note = await creating;
       await preparing;
       await repo.close();
-      final reopened = await openStartupNotebook(dir.path, keys: keys);
+      final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       expect(reopened.notes[note.vaultId]![note.id]!.journalDate, '2026-10-27');
       await reopened.close();
     },
@@ -384,7 +385,7 @@ void main() {
     final dir = Directory.systemTemp.createTempSync('silique-update-keys-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final keys = GatedKeys();
-    final repo = await openStartupNotebook(dir.path, keys: keys);
+    final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     await repo.createVault('Synthetic');
     final vault = repo.vaults.single;
     final note = await repo.createNote(vault.id);
@@ -457,7 +458,7 @@ void main() {
     keys.entered = null;
     keys.release = null;
     await repo.close();
-    final reopened = await openStartupNotebook(dir.path, keys: keys);
+    final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     expect(reopened.hiddenAutoLock, isNull);
     expect(keys.values['nova.localKey'], before['nova.localKey']);
     await reopened.close();
@@ -466,7 +467,7 @@ void main() {
     final dir = Directory.systemTemp.createTempSync('silique-update-hidden-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final keys = Keys();
-    final repo = await openStartupNotebook(dir.path, keys: keys);
+    final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     await repo.createVault('Synthetic');
     final vaultId = repo.vaults.single.id;
     await repo.setHiddenPassword('synthetic hidden password');
@@ -497,7 +498,7 @@ void main() {
       throwsStateError,
     );
     await repo.close();
-    final reopened = await openStartupNotebook(dir.path, keys: keys);
+    final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     expect(keys.values, savedKeys);
     expect(await reopened.unlockHidden('synthetic hidden password'), isTrue);
     expect(
@@ -512,7 +513,7 @@ void main() {
       final dir = Directory.systemTemp.createTempSync('silique-update-images-');
       addTearDown(() => dir.deleteSync(recursive: true));
       final keys = Keys();
-      final repo = await openStartupNotebook(dir.path, keys: keys);
+      final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       await repo.createVault('Synthetic');
       final note = await repo.createNote(repo.vaults.single.id);
       final uri = await repo.addImage(
@@ -572,7 +573,7 @@ void main() {
       await preparing;
       repo.resumeAfterUpdate();
       await repo.close();
-      final reopened = await openStartupNotebook(dir.path, keys: keys);
+      final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       expect(await reopened.imageBytes(note.vaultId, id), [1, 2, 3]);
       await reopened.close();
     },
@@ -609,7 +610,7 @@ void main() {
     );
     repo.resumeAfterUpdate();
     await repo.close();
-    final reopened = await openStartupNotebook(dir.path, keys: keys);
+    final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     expect(reopened.notes[note.vaultId]![note.id]!.body, 'committed in WAL');
     await reopened.close();
   });
@@ -617,7 +618,7 @@ void main() {
     final dir = Directory.systemTemp.createTempSync('silique-update-retry-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final keys = Keys();
-    final repo = await openStartupNotebook(dir.path, keys: keys);
+    final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     await repo.createVault('Synthetic');
     final note = await repo.createNote(repo.vaults.single.id);
     final storage = repo.storage as NativeStorage;
@@ -636,7 +637,7 @@ void main() {
     await repo.prepareForUpdate();
     repo.resumeAfterUpdate();
     await repo.close();
-    final reopened = await openStartupNotebook(dir.path, keys: keys);
+    final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     expect(reopened.notes[note.vaultId]![note.id]!.body, 'pending edit');
     await reopened.close();
   });
@@ -648,7 +649,7 @@ void main() {
       );
       addTearDown(() => dir.deleteSync(recursive: true));
       final keys = Keys();
-      final repo = await openStartupNotebook(dir.path, keys: keys);
+      final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       await repo.createVault('Synthetic');
       final note = await repo.createNote(repo.vaults.single.id);
       final entered = Completer<void>(), release = Completer<void>();
@@ -670,7 +671,7 @@ void main() {
       storage.db.execute('PRAGMA query_only=OFF');
       await repo.save(note.copyWith(body: 'retry after failed handoff'));
       await repo.close();
-      final reopened = await openStartupNotebook(dir.path, keys: keys);
+      final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
       expect(
         reopened.notes[note.vaultId]![note.id]!.body,
         'retry after failed handoff',
@@ -682,7 +683,7 @@ void main() {
     final dir = Directory.systemTemp.createTempSync('silique-update-barrier-');
     addTearDown(() => dir.deleteSync(recursive: true));
     final keys = Keys();
-    final repo = await openStartupNotebook(dir.path, keys: keys);
+    final repo = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     await repo.createVault('Preserve me');
     final note = await repo.createNote(repo.vaults.single.id);
     final entered = Completer<void>(), release = Completer<void>();
@@ -717,7 +718,7 @@ void main() {
     dynamicRepo.resumeAfterUpdate();
     await repo.save(note.copyWith(body: 'usable after UAC cancellation'));
     await repo.close();
-    final reopened = await openStartupNotebook(dir.path, keys: keys);
+    final reopened = await openStartupNotebook(dir.path, keys: keys, trustStore: InMemoryTrustStore());
     expect(
       reopened.notes[note.vaultId]![note.id]!.body,
       'usable after UAC cancellation',

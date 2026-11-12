@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:silique/core/contracts.dart';
+import 'package:silique/core/server_trust.dart';
 import 'package:silique/storage/native_storage.dart';
 import 'package:silique/storage/startup_notebook.dart';
 
@@ -32,12 +33,20 @@ void main() {
       addTearDown(() => directory.deleteSync(recursive: true));
       final originalKeys = _Keys((_) async => null);
       final root = '${directory.path}/notebook';
-      final original = await openStartupNotebook(root, keys: originalKeys);
+      final original = await openStartupNotebook(
+        root,
+        keys: originalKeys,
+        trustStore: InMemoryTrustStore(),
+      );
       await original.createVault('Existing vault');
       await original.close();
       final unavailableKeys = _Keys((_) async => null);
       Object? failure;
-      final reopening = openStartupNotebook(root, keys: unavailableKeys);
+      final reopening = openStartupNotebook(
+        root,
+        keys: unavailableKeys,
+        trustStore: InMemoryTrustStore(),
+      );
       try {
         final unexpected = await reopening;
         await unexpected.close();
@@ -51,7 +60,11 @@ void main() {
       );
       expect(failure, isA<StateError>());
       // The original still opens with its unchanged key and vault identity.
-      final restored = await openStartupNotebook(root, keys: originalKeys);
+      final restored = await openStartupNotebook(
+        root,
+        keys: originalKeys,
+        trustStore: InMemoryTrustStore(),
+      );
       try {
         expect(restored.vaults.single.name, 'Existing vault');
       } finally {
