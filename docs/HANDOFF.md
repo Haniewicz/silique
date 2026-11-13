@@ -1,3 +1,31 @@
+# Silique 0.2.51+60 — release published
+
+2026-11-13, on the owner's instruction, [Silique 0.2.51](https://github.com/Haniewicz/silique-releases/releases/tag/v0.2.51) was published: seven installers (macOS DMG, Android APK, Windows EXE/ZIP, three Linux GTK4 packages) plus `SHA256SUMS.txt`; both signed update feeds point at build 60. Source code for every package: `ee1b22b1b1d517a925ce72849515c1c616c07c1b` (`main`, 0.2.51+60). Scope and notes: [0.2.51](0.2.51.md).
+
+The release fixes one defect: appearance settings (compact mode, folder/note colours, default colours, folder order) could not be changed while a vault belonged to an account but the app had no owner session — `_writeMeta` threw `Connect the vault owner's account.` before the offline-tolerant path. The change now stays local as a pending edit and is pushed by the next sync after sign-in.
+
+Runs: macOS/Android [43425090180](https://github.com/Haniewicz/silique-releases/actions/runs/43425090180), Windows [43425096009](https://github.com/Haniewicz/silique-releases/actions/runs/43425096009), signed preparation [43430272378](https://github.com/Haniewicz/silique-releases/actions/runs/43430272378), publication [43431049330](https://github.com/Haniewicz/silique-releases/actions/runs/43431049330) — all `success`, no step with a non-success `outcome`. Linux built in CT 104; `SOURCE_COMMIT` and `SHA256SUMS-Linux.txt` verified locally before collection.
+
+Evidence: preflight on the released SHA `PREFLIGHT OK` (+1141 passed, ~46 skipped), adapter RED gate proved the new regression test red on the pre-fix commit, `flutter analyze` clean. All seven published assets were verified against the published `SHA256SUMS.txt` (all `OK`). The owner explicitly waived testing on his own device for this release; that is a decision, not a test result.
+
+The server was not touched by this release. Housekeeping note: draft releases `candidate-0.2.51-60` and `candidate-0.2.50-59` remain, since deleting releases is owner-only.
+
+---
+
+# Silique 0.2.51+60 — wydanie opublikowane
+
+2026-11-13, na polecenie właściciela, opublikowano [Silique 0.2.51](https://github.com/Haniewicz/silique-releases/releases/tag/v0.2.51): siedem instalatorów (macOS DMG, Android APK, Windows EXE/ZIP, trzy pakiety Linux GTK4) oraz `SHA256SUMS.txt`; oba podpisane kanały wskazują build 60. Kod wszystkich paczek: `ee1b22b1b1d517a925ce72849515c1c616c07c1b` (`main`, 0.2.51+60). Zakres i notki: [0.2.51](0.2.51.md).
+
+Wydanie naprawia jeden defekt: nie dało się zmienić ustawień wyglądu (tryb kompaktowy, kolory folderów i notatek, kolory domyślne, kolejność folderów), gdy vault należał do konta, a aplikacja nie miała sesji właściciela — `_writeMeta` rzucał `Połącz konto właściciela vaulta.` przed ścieżką tolerującą offline. Zmiana zostaje teraz lokalnie jako oczekująca i wchodzi na serwer przy najbliższej synchronizacji po zalogowaniu.
+
+Uruchomienia: macOS/Android [43425090180](https://github.com/Haniewicz/silique-releases/actions/runs/43425090180), Windows [43425096009](https://github.com/Haniewicz/silique-releases/actions/runs/43425096009), przygotowanie podpisane [43430272378](https://github.com/Haniewicz/silique-releases/actions/runs/43430272378), publikacja [43431049330](https://github.com/Haniewicz/silique-releases/actions/runs/43431049330) — wszystkie `success`, żaden krok z `outcome` innym niż sukces. Linux zbudowany w CT 104; `SOURCE_COMMIT` i `SHA256SUMS-Linux.txt` zweryfikowane lokalnie przed zebraniem.
+
+Dowody: preflight na wydanym SHA `PREFLIGHT OK` (+1141 przeszło, ~46 pominiętych), bramka RED adaptera dowiodła czerwoności nowego testu regresyjnego na commicie sprzed poprawki, `flutter analyze` czysty. Wszystkie siedem opublikowanych assetów zweryfikowano wobec opublikowanego `SHA256SUMS.txt` (wszystkie `OK`). Właściciel świadomie zrezygnował z testu na własnym urządzeniu dla tego wydania; to decyzja, nie wynik testu.
+
+Serwera to wydanie nie dotykało. Uwaga porządkowa: pozostają szkice `candidate-0.2.51-60` i `candidate-0.2.50-59`, bo usuwanie wydań należy wyłącznie do właściciela.
+
+---
+
 # Silique — rotacja tożsamości podpisu macOS: CN=Nova Notes Local Preview → CN=Silique (2026-11-10, NIEWYDANE)
 
 Decyzja właściciela z 2026-11-10 (zaktualizowana): brak konta Apple Developer, więc
