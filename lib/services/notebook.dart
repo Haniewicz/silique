@@ -955,41 +955,51 @@ class Notebook {
     var confirmed = vault.owner == null || !vault.syncEnabled;
     if (vault.owner != null && vault.syncEnabled) {
       if (session?.owner != vault.owner || api == null) {
-        _restoreMeta(vault.id, previousMeta);
-        vault.metadata = previousSealed;
-        throw StateError(
-          tr(
-            'Połącz konto właściciela vaulta.',
-            'Connect the vault owner\'s account.',
-          ),
-        );
-      }
-      // Rewrap the server key wrap to silique:2 on the first post-update
-      // write; a CAS conflict below keeps the previous wrap untouched.
-      final previousWrap = vault.keyWrap;
-      try {
-        vault.keyWrap = await _rewrapAccountKeyWrap(vault);
-        final response = await api!.request(
-          'PUT',
-          '/v1/vaults/${vault.id}',
-          body: {
-            'keyWrap': vault.keyWrap,
-            'metadata': sealed,
-            'expectedVersion': vault.version,
-          },
-        );
-        vault.version = response['version'] as int;
-        confirmed = true;
-      } catch (_) {
-        if (vault.keyWrap != previousWrap) vault.keyWrap = previousWrap;
-        _restoreMeta(vault.id, previousMeta);
-        vault.metadata = previousSealed;
-        vault.version = previousVersion;
-        if (!offlineTolerant) rethrow;
-        // Offline change: keep the local metadata and leave the confirmed base
-        // untouched, so the next sync still sees these folders as local edits.
+        if (!offlineTolerant) {
+          _restoreMeta(vault.id, previousMeta);
+          vault.metadata = previousSealed;
+          throw StateError(
+            tr(
+              'Połącz konto właściciela vaulta.',
+              'Connect the vault owner\'s account.',
+            ),
+          );
+        }
+        // A missing owner session is the same as being offline: keep the edit
+        // locally as unconfirmed pending metadata and let the next sync push it
+        // to the server. The confirmed merge base (`_setFolderBase` below) must
+        // not move, or the pending edit would be folded into the base and lost
+        // to the next three-way merge. Do not "fix" this back into a throw.
         if (identical(unlocked[vault.id], key)) _meta[vault.id] = meta;
         vault.metadata = sealed;
+      } else {
+        // Rewrap the server key wrap to silique:2 on the first post-update
+        // write; a CAS conflict below keeps the previous wrap untouched.
+        final previousWrap = vault.keyWrap;
+        try {
+          vault.keyWrap = await _rewrapAccountKeyWrap(vault);
+          final response = await api!.request(
+            'PUT',
+            '/v1/vaults/${vault.id}',
+            body: {
+              'keyWrap': vault.keyWrap,
+              'metadata': sealed,
+              'expectedVersion': vault.version,
+            },
+          );
+          vault.version = response['version'] as int;
+          confirmed = true;
+        } catch (_) {
+          if (vault.keyWrap != previousWrap) vault.keyWrap = previousWrap;
+          _restoreMeta(vault.id, previousMeta);
+          vault.metadata = previousSealed;
+          vault.version = previousVersion;
+          if (!offlineTolerant) rethrow;
+          // Offline change: keep the local metadata and leave the confirmed
+          // base untouched, so the next sync still sees these as local edits.
+          if (identical(unlocked[vault.id], key)) _meta[vault.id] = meta;
+          vault.metadata = sealed;
+        }
       }
     }
     // Only a server-confirmed list becomes the new merge base.
