@@ -272,6 +272,13 @@ class Notebook {
   // Access changes revoke launcher visibility without waking network sync.
   final _accessChanges = StreamController<void>.broadcast(sync: true);
   Stream<void> get accessChanges => _accessChanges.stream;
+
+  /// Vaults the last sync pass skipped, with the reason. Repopulated (and
+  /// cleared when nothing was skipped) on every run, so the UI can explain a
+  /// vault that never sends a request instead of reporting it as synced.
+  final List<SyncIssue> syncIssues = <SyncIssue>[];
+  final _syncIssuesChanged = StreamController<void>.broadcast(sync: true);
+  Stream<void> get syncIssuesChanged => _syncIssuesChanged.stream;
   String? mirrorWarning;
   List<Vault> get vaults => storage.vaults().map((v) {
     // The protected name in storage is a fixed redaction marker, not user data.
@@ -1995,6 +2002,8 @@ class Notebook {
     api = null;
     session = null;
     accountKey = null;
+    syncIssues.clear();
+    _syncIssuesChanged.add(null);
   }
 
   Future<void> enableSync(Vault vault) => serialized(() async {
@@ -2051,7 +2060,129 @@ class Notebook {
     );
     storage.putVault(vault);
   });
+
+  /// Reattaches [vault] — whose `owner` no longer matches the signed-in account
+  /// — to the current account/server. This is the supported repair for the
+  /// owner-mismatch case: the vault key is rewrapped with the account key under
+  /// `silique:2:vault-key:<id>` (the same `'mode':'account'` pattern as
+  /// [enableSync]), the server copy is created/updated with an `expectedVersion`
+  /// that matches the server's own state, and a full [sync] follows.
+  ///
+  /// A `410 vault_deleted` response is surfaced as an explicit message (the
+  /// identity was retired server-side and cannot be recreated under the same
+  /// ID); local notes are never erased.
+  Future<void> rebindVault(Vault vault) async {
+    await serialized(() => _rebindVaultToAccount(vault));
+    await sync();
+  }
+
+  Future<void> _rebindVaultToAccount(Vault vault) async {
+    _requireLiveVault(vault.id);
+    if (session == null || accountKey == null) {
+      throw StateError(
+        tr('Najpierw połącz konto.', 'Connect an account first.'),
+      );
+    }
+    if (!unlocked.containsKey(vault.id)) {
+      throw StateError(
+        tr('Najpierw odblokuj vault.', 'Unlock the vault first.'),
+      );
+    }
+    if (!vault.protected) {
+      vault.keyWrap = jsonEncode({
+        'mode': 'account',
+        'wrapped': await crypto.seal(
+          accountKey!,
+          base64Encode(unlocked[vault.id]!),
+          'silique:2:vault-key:${vault.id}',
+        ),
+      });
+    }
+    final expectedVersion = await _rebindExpectedVersion(vault);
+    try {
+      final response = await api!.request(
+        'PUT',
+        '/v1/vaults/${vault.id}',
+        body: {
+          'keyWrap': vault.keyWrap,
+          'metadata': vault.metadata,
+          'expectedVersion': expectedVersion,
+        },
+      );
+      vault.version = response['version'] as int;
+    } on ApiException catch (error) {
+      if (error.status == 410) {
+        throw StateError(_rebindTombstoneMessage());
+      }
+      rethrow;
+    }
+    vault.owner = session!.owner;
+    vault.syncEnabled = true;
+    await _setFolderBase(
+      vault,
+      foldersOf(vault.id),
+      defaultNoteColor: decodeDefaultColor(
+        _meta[vault.id]?['defaultNoteColor'],
+      ),
+      defaultFolderColor: decodeDefaultColor(
+        _meta[vault.id]?['defaultFolderColor'],
+      ),
+    );
+    storage.putVault(vault);
+  }
+
+  /// The `expectedVersion` for the rebind PUT, resolved from the *current*
+  /// server: a vault already listed there must compare-and-swap against its
+  /// live version, while an unknown vault is a fresh create (`0`).
+  Future<int> _rebindExpectedVersion(Vault vault) async {
+    final remote = await api!.request('GET', '/v1/vaults');
+    final listed = (remote['vaults'] as List? ?? const [])
+        .whereType<Json>()
+        .where((item) => item['id'] == vault.id)
+        .toList();
+    if (listed.isNotEmpty) {
+      return listed.first['version'] as int? ?? 0;
+    }
+    return 0;
+  }
+
+  String _rebindTombstoneMessage() => tr(
+    'Ten vault został usunięty na serwerze i nie można go odtworzyć pod tym samym identyfikatorem. Lokalne notatki pozostały bez zmian.',
+    'This vault was deleted on the server and cannot be recreated under the same ID. Local notes were left unchanged.',
+  );
+
   Future<void> sync() => _operation(_sync, failureKey: 'sync');
+
+  /// Rebuilds [syncIssues] for every local vault the `_sync` content gate would
+  /// reject, so a skip is reported instead of ending the pass as a silent no-op.
+  /// Cleared and repopulated on every run; a vault that actually syncs emits no
+  /// entry.
+  void _refreshSyncIssues() {
+    syncIssues.clear();
+    final currentOwner = session?.owner;
+    for (final v in vaults) {
+      if (vaultDeletionPending(v.id)) {
+        syncIssues.add(
+          SyncIssue(vaultId: v.id, reason: SyncIssue.deletionPending),
+        );
+      } else if (!v.syncEnabled) {
+        syncIssues.add(SyncIssue(vaultId: v.id, reason: SyncIssue.syncDisabled));
+      } else if (v.owner != null && v.owner != currentOwner) {
+        syncIssues.add(
+          SyncIssue(
+            vaultId: v.id,
+            reason: SyncIssue.ownerMismatch,
+            owner: v.owner,
+            sessionOwner: currentOwner,
+          ),
+        );
+      } else if (!unlocked.containsKey(v.id)) {
+        syncIssues.add(SyncIssue(vaultId: v.id, reason: SyncIssue.locked));
+      }
+    }
+    _syncIssuesChanged.add(null);
+  }
+
   Future<void> _sync() async {
     if ((_updatePrepared && !_insideOperation) ||
         _syncing ||
@@ -2076,6 +2207,7 @@ class Notebook {
     _syncing = true;
     final client = api!;
     final owner = session!.owner;
+    _refreshSyncIssues();
     try {
       final remote = await client.request('GET', '/v1/vaults');
       if (api != client || session?.owner != owner) return;

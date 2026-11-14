@@ -182,3 +182,29 @@ class Session {
     email: j['email'] as String,
   );
 }
+
+/// A vault that a sync pass decided not to push/pull, with the reason the UI
+/// can show instead of the previous silent skip.
+///
+/// [owner] and [sessionOwner] carry both sides of an owner mismatch so the
+/// account tab can name the account the vault still belongs to and the account
+/// the app is currently signed in as.
+class SyncIssue {
+  const SyncIssue({
+    required this.vaultId,
+    required this.reason,
+    this.owner,
+    this.sessionOwner,
+  });
+
+  /// Reasons: `ownerMismatch`, `syncDisabled`, `locked`, `deletionPending`.
+  static const ownerMismatch = 'ownerMismatch';
+  static const syncDisabled = 'syncDisabled';
+  static const locked = 'locked';
+  static const deletionPending = 'deletionPending';
+
+  final String vaultId;
+  final String reason;
+  final String? owner;
+  final String? sessionOwner;
+}

@@ -550,6 +550,96 @@ class _SettingsPanelState extends State<SettingsPanel>
     }
   }
 
+  bool _ownerMismatch(Vault v) =>
+      v.owner != null && v.owner != repo.session!.owner;
+
+  ({String host, String userId}) _ownerParts(String? owner) {
+    final value = owner ?? '';
+    final separator = value.indexOf('|');
+    return (
+      host: separator < 0 ? value : value.substring(0, separator),
+      userId: separator < 0 ? value : value.substring(separator + 1),
+    );
+  }
+
+  String _shortUserId(String userId) =>
+      userId.length <= 8 ? userId : '…${userId.substring(0, 8)}';
+
+  /// The tile subtitle for the "SYNCED VAULTS" switch. An owner mismatch names
+  /// the account/server the vault still belongs to and offers the explicit
+  /// rebind action instead of leaving a grey, unexplained switch.
+  Widget _vaultSyncSubtitle(Vault v) {
+    if (_ownerMismatch(v)) {
+      final parts = _ownerParts(v.owner);
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr(
+              'Przypisany do ${parts.host} • konto ${_shortUserId(parts.userId)}. Podłącz do tego konta, aby wznowić synchronizację.',
+              'Belongs to ${parts.host} • account ${_shortUserId(parts.userId)}. Connect it to this account to resume syncing.',
+            ),
+            style: const TextStyle(color: muted, fontSize: 11),
+          ),
+          const SizedBox(height: 4),
+          TextButton(
+            key: Key('rebind-vault-${v.id}'),
+            onPressed: busy ? null : () => _confirmRebind(v),
+            child: Text(tr('Podłącz do tego konta', 'Connect to this account')),
+          ),
+        ],
+      );
+    }
+    return Text(
+      v.protected
+          ? tr(
+              'Dodatkowe hasło • odblokuj przed synchronizacją',
+              'Additional password • unlock before syncing',
+            )
+          : tr(
+              'Klucz konta • szyfrowanie E2EE',
+              'Account key • E2EE encryption',
+            ),
+      style: const TextStyle(color: muted, fontSize: 11),
+    );
+  }
+
+  Future<void> _confirmRebind(Vault v) => run(() => _serverAction(() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ListenableBuilder(
+        listenable: appLanguage,
+        builder: (ctx, _) => AlertDialog(
+          title: Text(
+            tr(
+              'Podłączyć vault do tego konta?',
+              'Connect the vault to this account?',
+            ),
+          ),
+          content: Text(
+            tr(
+              'To zmienia właściciela vaulta na bieżące konto i serwer. Vault zacznie synchronizować się z tym kontem.',
+              'This changes the vault owner to the current account and server. The vault will start syncing with this account.',
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(ctx, false),
+              child: Text(tr('Anuluj', 'Cancel')),
+            ),
+            FilledButton(
+              key: const Key('rebind-vault-confirm'),
+              onPressed: () => Navigator.pop(ctx, true),
+              child: Text(tr('Podłącz do tego konta', 'Connect to this account')),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (confirmed != true) return;
+    await repo.rebindVault(v);
+  }));
+
   CertInfo _untrustedCertInfo(UntrustedServerCertificate error) => CertInfo(
     spki: error.spki,
     subject: error.subject,
@@ -1459,10 +1549,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           value: v.syncEnabled,
-                          onChanged:
-                              busy ||
-                                  v.owner != null &&
-                                      v.owner != repo.session!.owner
+                          onChanged: busy || _ownerMismatch(v)
                               ? null
                               : (enabled) => run(() => _serverAction(() async {
                                   if (enabled) {
@@ -1477,18 +1564,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                             v.name,
                             style: const TextStyle(fontSize: 14),
                           ),
-                          subtitle: Text(
-                            v.protected
-                                ? tr(
-                                    'Dodatkowe hasło • odblokuj przed synchronizacją',
-                                    'Additional password • unlock before syncing',
-                                  )
-                                : tr(
-                                    'Klucz konta • szyfrowanie E2EE',
-                                    'Account key • E2EE encryption',
-                                  ),
-                            style: const TextStyle(color: muted, fontSize: 11),
-                          ),
+                          subtitle: _vaultSyncSubtitle(v),
                         ),
                       const SizedBox(height: 20),
                       Row(

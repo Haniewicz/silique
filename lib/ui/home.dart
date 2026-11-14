@@ -296,6 +296,31 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _ => _status,
   };
 
+  /// The skip reason the last sync pass recorded for the active vault, or null
+  /// when it synced normally (or no vault is current).
+  SyncIssue? get _activeSyncIssue {
+    final id = _vaultId;
+    if (id == null) return null;
+    return repo.syncIssues.where((issue) => issue.vaultId == id).firstOrNull;
+  }
+
+  String _syncIssueLabel(SyncIssue issue) => switch (issue.reason) {
+    SyncIssue.ownerMismatch => tr(
+      'Vault przypisany do innego konta — synchronizacja pominięta',
+      'Vault belongs to another account — sync skipped',
+    ),
+    SyncIssue.syncDisabled => tr('Synchronizacja wyłączona', 'Sync disabled'),
+    SyncIssue.locked => tr(
+      'Vault zablokowany — odblokuj przed synchronizacją',
+      'Vault locked — unlock before syncing',
+    ),
+    SyncIssue.deletionPending => tr(
+      'Trwa usuwanie vaulta',
+      'Vault deletion in progress',
+    ),
+    _ => issue.reason,
+  };
+
   /// Every folder known to the active vault, sorted for pickers.
   List<String> get _allFolderPaths =>
       repo.allFolders(_vaultId ?? '').toList()..sort();
@@ -5445,9 +5470,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// The readable state lives in the hover tooltip.
   Widget _syncBadge({bool small = false}) {
     final localOnly = vault?.syncEnabled != true;
-    // A failed attempt covers a save error and an offline sync failure.
-    final failed = _status.startsWith('Błąd') || _status.startsWith('Offline');
-    final synced = _status.startsWith('Zsynchronizowano');
+    // A skipped vault counts as a genuinely unsuccessful pass alongside a save
+    // error and an offline sync failure.
+    final issue = _activeSyncIssue;
+    final failed = issue != null ||
+        _status.startsWith('Błąd') ||
+        _status.startsWith('Offline');
+    final synced = issue == null && _status.startsWith('Zsynchronizowano');
     // Local changes waiting to go out: an edit that has not reached the
     // debounced save yet (_dirty), or a save whose sync pass is still pending.
     final pending =
@@ -5455,11 +5484,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         (_dirty || _status == 'Zapisano lokalnie • oczekuje na synchronizację');
     final syncing = !localOnly && _syncing;
     // A local-only vault never exchanges content, so an offline status is not a
-    // connection loss — only a save error overrides its "Local" tooltip.
+    // connection loss — only a save error overrides its "Local" tooltip. A
+    // skipped vault names the skip reason instead of falsely claiming "synced".
     final label = localOnly
         ? (_status.startsWith('Błąd') ? _statusLabel : tr('Lokalnie', 'Local'))
         : _syncing
         ? tr('Synchronizacja…', 'Syncing…')
+        : issue != null
+        ? _syncIssueLabel(issue)
         : _statusLabel;
     final size = small ? 13.0 : 17.0;
 
