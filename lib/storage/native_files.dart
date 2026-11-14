@@ -103,6 +103,38 @@ Future<StorageChoice?> chooseStorageDirectory() async {
   return StorageChoice(path: path, label: path);
 }
 
+/// Test seam for the desktop export destination picker, mirroring the storage
+/// picker seam so widget tests can replace the native dialog.
+@visibleForTesting
+Future<String?> Function()? debugExportDirectoryPicker;
+
+/// Asks the user for a destination directory (desktop only).
+///
+/// Returns `null` when the user cancels. Mobile has no directory picker here:
+/// calls go through [shareExportZip] instead.
+Future<String?> chooseExportDirectory() async {
+  final override = debugExportDirectoryPicker;
+  if (override != null) return override();
+  return getDirectoryPath(
+    confirmButtonText: tr('Wybierz', 'Choose'),
+  );
+}
+
+/// Shares an in-memory ZIP archive (mobile only).
+Future<void> shareExportZip({
+  required Uint8List bytes,
+  required String name,
+}) async {
+  if (Platform.isAndroid || Platform.isIOS) {
+    await SharePlus.instance.share(
+      ShareParams(
+        files: [XFile.fromData(bytes, mimeType: 'application/zip', name: name)],
+        fileNameOverrides: [name],
+      ),
+    );
+  }
+}
+
 /// Legacy constant retained for callers that use it in const collections.
 /// UI pickers must use [localizedImageTypes] so their label follows the language.
 const imageTypes = XTypeGroup(
