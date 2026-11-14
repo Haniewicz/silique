@@ -100,9 +100,7 @@ extension NotebookVaultDeletion on Notebook {
           ),
         );
       }
-    } else if (!vault.syncEnabled ||
-        session?.owner != vault.owner ||
-        api == null) {
+    } else if (!vault.syncEnabled || !_ownerIsCurrent(vault.owner) || api == null) {
       throw StateError(
         tr(
           'Połącz konto właściciela i włącz synchronizację. Usuwanie nie może być tylko lokalne.',
@@ -135,7 +133,7 @@ extension NotebookVaultDeletion on Notebook {
         final intent = jsonDecode(entry.value) as Json;
         final owner = intent['owner'];
         if (intent['acknowledged'] != true &&
-            (owner != session?.owner || api == null)) {
+            (!_ownerIsCurrent(owner as String?) || api == null)) {
           continue;
         }
         try {
@@ -154,7 +152,8 @@ extension NotebookVaultDeletion on Notebook {
   Future<void> _resumeVaultDeletion(String id, Json intent) async {
     if (intent['acknowledged'] != true) {
       final client = api;
-      if (client == null || session?.owner != intent['owner']) {
+      if (client == null ||
+          !_ownerIsCurrent(intent['owner'] as String?)) {
         throw StateError(
           tr(
             'Połącz konto właściciela, aby dokończyć usuwanie.',
@@ -199,7 +198,7 @@ extension NotebookVaultDeletion on Notebook {
   Future<void> _acceptVaultTombstone(String id, String owner) async {
     if (storage.isVaultDeleted(id)) return;
     final local = vaults.where((v) => v.id == id).firstOrNull;
-    if (local != null && local.owner != owner) return;
+    if (local != null && vaultOwnerUserId(local.owner) != owner) return;
     _deletingVaults.add(id);
     await storage.beginVaultDeletion(
       id,
@@ -217,7 +216,7 @@ extension NotebookVaultDeletion on Notebook {
       final intent = jsonDecode(entry.value) as Json;
       if (intent['acknowledged'] == true ||
           intent['attempted'] != true ||
-          intent['owner'] != owner ||
+          vaultOwnerUserId(intent['owner'] as String?) != owner ||
           storage.isVaultDeleted(entry.key)) {
         continue;
       }

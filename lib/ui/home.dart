@@ -318,6 +318,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       'Trwa usuwanie vaulta',
       'Vault deletion in progress',
     ),
+    SyncIssue.tombstoned => tr(
+      'Vault usunięty na serwerze — nie odtworzony',
+      'Vault deleted on the server — not recreated',
+    ),
     _ => issue.reason,
   };
 

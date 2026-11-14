@@ -137,6 +137,24 @@ class Vault {
   );
 }
 
+/// The account id a `Vault.owner` value refers to, without any server
+/// component. Historical values were `${server}|${userId}`; everything after
+/// the first `|` is the account id. A value without a separator is already a
+/// bare account id. `null` (never bound) yields the empty string.
+String vaultOwnerUserId(String? owner) {
+  if (owner == null) return '';
+  final separator = owner.indexOf('|');
+  return separator < 0 ? owner : owner.substring(separator + 1);
+}
+
+/// The server host recorded in a historical owner value, or `null` when the
+/// value carries no server component (provenance only, never a sync gate).
+String? vaultOwnerServer(String? owner) {
+  if (owner == null) return null;
+  final separator = owner.indexOf('|');
+  return separator < 0 ? null : owner.substring(0, separator);
+}
+
 class Revision {
   const Revision({
     required this.id,
@@ -168,7 +186,19 @@ class Session {
     required this.email,
   });
   final String server, token, userId, email;
-  String get owner => '$server|$userId';
+
+  /// Account identity without the server component. This is what `Vault.owner`
+  /// stores: provenance of "which account this was last synced with", never a
+  /// gate on the sync path. Switching the server is an ordinary destination
+  /// change and must not change a vault's identity or its owner value.
+  String get owner => userId;
+
+  /// The server-qualified name that was historically used (and is still used)
+  /// to derive the local account master-key slot. It intentionally keeps the
+  /// `${server}|` prefix so the `nova.account.*` slot family stays stable for
+  /// existing installs and the branding/pinning rules.
+  String get accountSlotOwner => '$server|$userId';
+
   Json toJson() => {
     'server': server,
     'token': token,
@@ -197,11 +227,17 @@ class SyncIssue {
     this.sessionOwner,
   });
 
-  /// Reasons: `ownerMismatch`, `syncDisabled`, `locked`, `deletionPending`.
+  /// Reasons: `ownerMismatch`, `syncDisabled`, `locked`, `deletionPending`,
+  /// `tombstoned`.
   static const ownerMismatch = 'ownerMismatch';
   static const syncDisabled = 'syncDisabled';
   static const locked = 'locked';
   static const deletionPending = 'deletionPending';
+
+  /// The vault ID is permanently tombstones on the server (`410 vault_deleted`)
+  /// or listed in `deletedVaults`. It must not be silently recreated; the UI
+  /// offers an explicit, warned recreation instead.
+  static const tombstoned = 'tombstoned';
 
   final String vaultId;
   final String reason;

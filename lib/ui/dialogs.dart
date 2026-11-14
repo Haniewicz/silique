@@ -551,43 +551,34 @@ class _SettingsPanelState extends State<SettingsPanel>
   }
 
   bool _ownerMismatch(Vault v) =>
-      v.owner != null && v.owner != repo.session!.owner;
+      v.owner != null && vaultOwnerUserId(v.owner) != repo.session?.userId;
 
-  ({String host, String userId}) _ownerParts(String? owner) {
-    final value = owner ?? '';
-    final separator = value.indexOf('|');
-    return (
-      host: separator < 0 ? value : value.substring(0, separator),
-      userId: separator < 0 ? value : value.substring(separator + 1),
-    );
-  }
+  bool _tombstoned(Vault v) => repo.syncIssues.any(
+    (issue) =>
+        issue.vaultId == v.id && issue.reason == SyncIssue.tombstoned,
+  );
 
-  String _shortUserId(String userId) =>
-      userId.length <= 8 ? userId : '…${userId.substring(0, 8)}';
-
-  /// The tile subtitle for the "SYNCED VAULTS" switch. An owner mismatch names
-  /// the account/server the vault still belongs to and offers the explicit
-  /// rebind action instead of leaving a grey, unexplained switch.
+  /// The tile subtitle for the "SYNCED VAULTS" switch. Ownership is provenance,
+  /// not a sync gate: a mismatch is explained non-blockingly (the next sync
+  /// re-binds the vault in place), and a tombstoned id is explained without
+  /// resurrecting the deleted data.
   Widget _vaultSyncSubtitle(Vault v) {
+    if (_tombstoned(v)) {
+      return Text(
+        tr(
+          'Usunięty na serwerze — nie odtworzono automatycznie. Lokalne notatki pozostały bez zmian.',
+          'Deleted on the server — not recreated automatically. Local notes were left unchanged.',
+        ),
+        style: const TextStyle(color: muted, fontSize: 11),
+      );
+    }
     if (_ownerMismatch(v)) {
-      final parts = _ownerParts(v.owner);
-      return Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            tr(
-              'Przypisany do ${parts.host} • konto ${_shortUserId(parts.userId)}. Podłącz do tego konta, aby wznowić synchronizację.',
-              'Belongs to ${parts.host} • account ${_shortUserId(parts.userId)}. Connect it to this account to resume syncing.',
-            ),
-            style: const TextStyle(color: muted, fontSize: 11),
-          ),
-          const SizedBox(height: 4),
-          TextButton(
-            key: Key('rebind-vault-${v.id}'),
-            onPressed: busy ? null : () => _confirmRebind(v),
-            child: Text(tr('Podłącz do tego konta', 'Connect to this account')),
-          ),
-        ],
+      return Text(
+        tr(
+          'Przypisany do innego konta — synchronizacja przepnie vault do bieżącego konta.',
+          'Bound to another account — syncing re-binds the vault to this account.',
+        ),
+        style: const TextStyle(color: muted, fontSize: 11),
       );
     }
     return Text(
@@ -603,42 +594,6 @@ class _SettingsPanelState extends State<SettingsPanel>
       style: const TextStyle(color: muted, fontSize: 11),
     );
   }
-
-  Future<void> _confirmRebind(Vault v) => run(() => _serverAction(() async {
-    final confirmed = await showDialog<bool>(
-      context: context,
-      builder: (ctx) => ListenableBuilder(
-        listenable: appLanguage,
-        builder: (ctx, _) => AlertDialog(
-          title: Text(
-            tr(
-              'Podłączyć vault do tego konta?',
-              'Connect the vault to this account?',
-            ),
-          ),
-          content: Text(
-            tr(
-              'To zmienia właściciela vaulta na bieżące konto i serwer. Vault zacznie synchronizować się z tym kontem.',
-              'This changes the vault owner to the current account and server. The vault will start syncing with this account.',
-            ),
-          ),
-          actions: [
-            TextButton(
-              onPressed: () => Navigator.pop(ctx, false),
-              child: Text(tr('Anuluj', 'Cancel')),
-            ),
-            FilledButton(
-              key: const Key('rebind-vault-confirm'),
-              onPressed: () => Navigator.pop(ctx, true),
-              child: Text(tr('Podłącz do tego konta', 'Connect to this account')),
-            ),
-          ],
-        ),
-      ),
-    );
-    if (confirmed != true) return;
-    await repo.rebindVault(v);
-  }));
 
   CertInfo _untrustedCertInfo(UntrustedServerCertificate error) => CertInfo(
     spki: error.spki,
@@ -1549,7 +1504,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                         SwitchListTile(
                           contentPadding: EdgeInsets.zero,
                           value: v.syncEnabled,
-                          onChanged: busy || _ownerMismatch(v)
+                          onChanged: busy
                               ? null
                               : (enabled) => run(() => _serverAction(() async {
                                   if (enabled) {

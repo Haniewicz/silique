@@ -140,9 +140,7 @@ extension NotebookImages on Notebook {
     _requireLiveVault(vaultId);
     var local = storage.imageAsset(vaultId, id);
     final vault = vaults.firstWhere((v) => v.id == vaultId);
-    final client = vault.syncEnabled && vault.owner == session?.owner
-        ? api
-        : null;
+    final client = vault.syncEnabled ? api : null;
     if (local == null) {
       if (client == null) {
         throw StateError(

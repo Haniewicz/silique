@@ -329,7 +329,9 @@ class Notebook {
       session = Session.fromJson(jsonDecode(cached) as Json);
       await _loadIdentity('${session!.server}|${session!.email.toLowerCase()}');
       api = SiliqueApi(session!.server, token: session!.token, trust: trust);
-      final master = await keys.read(await _accountSlot(session!.owner));
+      final master = await keys.read(
+        await _accountSlot(session!.accountSlotOwner),
+      );
       if (master != null) accountKey = base64Decode(master);
     }
     await loadHiddenSettings();
@@ -343,6 +345,13 @@ class Notebook {
 
   Future<String> _accountSlot(String owner) async =>
       'nova.account.${await crypto.stableId(localKey, owner)}';
+
+  /// Whether a recorded owner refers to the signed-in account. Only the account
+  /// id is compared (`vaultOwnerUserId`), so a historical `${server}|` prefix
+  /// never counts as a different account, and a `null`/unbound owner never
+  /// matches. Owner is provenance metadata, never a sync gate.
+  bool _ownerIsCurrent(String? owner) =>
+      owner != null && vaultOwnerUserId(owner) == session?.userId;
   Future<List<int>> _unwrapPassword(
     String id,
     String wrap,
@@ -963,7 +972,7 @@ class Notebook {
     vault.metadata = sealed;
     var confirmed = vault.owner == null || !vault.syncEnabled;
     if (vault.owner != null && vault.syncEnabled) {
-      if (session?.owner != vault.owner || api == null) {
+      if (!_ownerIsCurrent(vault.owner) || api == null) {
         if (!offlineTolerant) {
           _restoreMeta(vault.id, previousMeta);
           vault.metadata = previousSealed;
@@ -1337,7 +1346,7 @@ class Notebook {
     }
     final vault = vaults.firstWhere((v) => v.id == note.vaultId);
     if (vault.owner != null) {
-      if (!vault.syncEnabled || session?.owner != vault.owner) {
+      if (!vault.syncEnabled || !_ownerIsCurrent(vault.owner)) {
         throw StateError(
           tr(
             'Włącz synchronizację i połącz konto właściciela, aby usunąć notatkę na wszystkich urządzeniach.',
@@ -1531,7 +1540,7 @@ class Notebook {
         vault.keyWrap = jsonEncode(old);
         // CAS on the server precedes local replacement, preserving the old wrap on error.
         if (vault.syncEnabled) {
-          if (session?.owner != vault.owner) {
+          if (!_ownerIsCurrent(vault.owner)) {
             throw StateError(
               tr(
                 'Zaloguj się na konto tego vaulta.',
@@ -1796,8 +1805,8 @@ class Notebook {
         userId: auth['userId'] as String,
         email: email,
       );
-      final slot = await _accountSlot(next.owner),
-          cached = await keys.read(await _accountSlot(next.owner));
+      final slot = await _accountSlot(next.accountSlotOwner),
+          cached = await keys.read(await _accountSlot(next.accountSlotOwner));
       List<int>? master = cached == null ? null : base64Decode(cached);
       String? recovery;
       if (auth['accountEnvelope'] == null) {
@@ -1968,7 +1977,10 @@ class Notebook {
         details.context,
       ),
     );
-    await keys.write(await _accountSlot(session!.owner), base64Encode(master));
+    await keys.write(
+      await _accountSlot(session!.accountSlotOwner),
+      base64Encode(master),
+    );
     accountKey = master;
     return true;
   }
@@ -1986,7 +1998,10 @@ class Notebook {
         'nova:1:account:${session!.userId}',
       ),
     );
-    await keys.write(await _accountSlot(session!.owner), base64Encode(master));
+    await keys.write(
+      await _accountSlot(session!.accountSlotOwner),
+      base64Encode(master),
+    );
     accountKey = master;
   }
 
@@ -2006,60 +2021,16 @@ class Notebook {
     _syncIssuesChanged.add(null);
   }
 
-  Future<void> enableSync(Vault vault) => serialized(() async {
-    _requireLiveVault(vault.id);
-    if (session == null || accountKey == null) {
-      throw StateError(
-        tr('Najpierw połącz konto.', 'Connect an account first.'),
-      );
-    }
-    if (!unlocked.containsKey(vault.id)) {
-      throw StateError(
-        tr('Najpierw odblokuj vault.', 'Unlock the vault first.'),
-      );
-    }
-    if (vault.owner != null && vault.owner != session!.owner) {
-      throw StateError(
-        tr(
-          'Vault jest przypisany do innego konta lub serwera.',
-          'The vault belongs to another account or server.',
-        ),
-      );
-    }
-    if (!vault.protected) {
-      vault.keyWrap = jsonEncode({
-        'mode': 'account',
-        'wrapped': await crypto.seal(
-          accountKey!,
-          base64Encode(unlocked[vault.id]!),
-          'silique:2:vault-key:${vault.id}',
-        ),
-      });
-    }
-    final response = await api!.request(
-      'PUT',
-      '/v1/vaults/${vault.id}',
-      body: {
-        'keyWrap': vault.keyWrap,
-        'metadata': vault.metadata,
-        'expectedVersion': vault.version,
-      },
-    );
-    vault.version = response['version'] as int;
-    vault.owner = session!.owner;
-    vault.syncEnabled = true;
-    await _setFolderBase(
-      vault,
-      foldersOf(vault.id),
-      defaultNoteColor: decodeDefaultColor(
-        _meta[vault.id]?['defaultNoteColor'],
-      ),
-      defaultFolderColor: decodeDefaultColor(
-        _meta[vault.id]?['defaultFolderColor'],
-      ),
-    );
-    storage.putVault(vault);
-  });
+  /// Enables synchronization for [vault]: the vault key is freshly wrapped with
+  /// the current account key (`silique:2:vault-key:<id>`, `'mode':'account'`),
+  /// the server copy is created/updated with the server's own `expectedVersion`
+  /// (0 when unknown), and the vault is marked as owned by the current account.
+  ///
+  /// Ownership is provenance, not identity: this never rejects a vault whose
+  /// `owner` names another account/server — it simply re-binds it, exactly like
+  /// the automatic pass inside [sync].
+  Future<void> enableSync(Vault vault) =>
+      serialized(() => _rebindVaultToAccount(vault));
 
   /// Reattaches [vault] — whose `owner` no longer matches the signed-in account
   /// — to the current account/server. This is the supported repair for the
@@ -2088,6 +2059,23 @@ class Notebook {
         tr('Najpierw odblokuj vault.', 'Unlock the vault first.'),
       );
     }
+    final expectedVersion = await _rebindExpectedVersion(vault);
+    try {
+      await _rebindVaultCore(vault, expectedVersion);
+    } on ApiException catch (error) {
+      if (error.status == 410) {
+        throw StateError(_rebindTombstoneMessage());
+      }
+      rethrow;
+    }
+  }
+
+  /// The raw rebind CAS. Rewraps the vault key with the account key under
+  /// `silique:2:vault-key:<id>` (`'mode':'account'`), PUTs with
+  /// [expectedVersion] (0 creates a fresh server copy), adopts the returned
+  /// version, and only after a confirmed PUT marks the vault as owned by the
+  /// current account. Throws [ApiException] on failure without mutating owner.
+  Future<void> _rebindVaultCore(Vault vault, int expectedVersion) async {
     if (!vault.protected) {
       vault.keyWrap = jsonEncode({
         'mode': 'account',
@@ -2098,24 +2086,25 @@ class Notebook {
         ),
       });
     }
-    final expectedVersion = await _rebindExpectedVersion(vault);
-    try {
-      final response = await api!.request(
-        'PUT',
-        '/v1/vaults/${vault.id}',
-        body: {
-          'keyWrap': vault.keyWrap,
-          'metadata': vault.metadata,
-          'expectedVersion': expectedVersion,
-        },
-      );
-      vault.version = response['version'] as int;
-    } on ApiException catch (error) {
-      if (error.status == 410) {
-        throw StateError(_rebindTombstoneMessage());
-      }
-      rethrow;
+    if (expectedVersion == 0) {
+      // A fresh server copy has none of the local history. Mark every local
+      // revision pending BEFORE the PUT so that even an interruption right
+      // after the server commits durably re-uploads the whole DAG (in
+      // parent-before-child insertion order) on the next push. The old pull
+      // cursor belongs to a different server, so restart it at 0.
+      storage.markAllPending(vault.id);
+      storage.setCursor(vault.id, 0);
     }
+    final response = await api!.request(
+      'PUT',
+      '/v1/vaults/${vault.id}',
+      body: {
+        'keyWrap': vault.keyWrap,
+        'metadata': vault.metadata,
+        'expectedVersion': expectedVersion,
+      },
+    );
+    vault.version = response['version'] as int;
     vault.owner = session!.owner;
     vault.syncEnabled = true;
     await _setFolderBase(
@@ -2156,10 +2145,12 @@ class Notebook {
   /// Rebuilds [syncIssues] for every local vault the `_sync` content gate would
   /// reject, so a skip is reported instead of ending the pass as a silent no-op.
   /// Cleared and repopulated on every run; a vault that actually syncs emits no
-  /// entry.
+  /// entry. Ownership is provenance, never a gate, so a foreign owner is no
+  /// longer reported here — such a vault is re-bound automatically inside
+  /// [sync] (or reported as [SyncIssue.tombstoned] when the server retired the
+  /// ID).
   void _refreshSyncIssues() {
     syncIssues.clear();
-    final currentOwner = session?.owner;
     for (final v in vaults) {
       if (vaultDeletionPending(v.id)) {
         syncIssues.add(
@@ -2167,19 +2158,22 @@ class Notebook {
         );
       } else if (!v.syncEnabled) {
         syncIssues.add(SyncIssue(vaultId: v.id, reason: SyncIssue.syncDisabled));
-      } else if (v.owner != null && v.owner != currentOwner) {
-        syncIssues.add(
-          SyncIssue(
-            vaultId: v.id,
-            reason: SyncIssue.ownerMismatch,
-            owner: v.owner,
-            sessionOwner: currentOwner,
-          ),
-        );
       } else if (!unlocked.containsKey(v.id)) {
         syncIssues.add(SyncIssue(vaultId: v.id, reason: SyncIssue.locked));
       }
     }
+    _syncIssuesChanged.add(null);
+  }
+
+  /// Records a vault-level skip reason (used for tombstoned vaults discovered
+  /// after the initial [syncIssues] rebuild) without duplicating an existing
+  /// entry for the same vault.
+  void _recordSyncIssue(SyncIssue issue) {
+    if (syncIssues.any((existing) =>
+        existing.vaultId == issue.vaultId && existing.reason == issue.reason)) {
+      return;
+    }
+    syncIssues.add(issue);
     _syncIssuesChanged.add(null);
   }
 
@@ -2225,6 +2219,66 @@ class Notebook {
       if (accountKey == null || api != client || session?.owner != owner) {
         return;
       }
+      // Automatic re-binding pass. Ownership is provenance, not a sync gate: a
+      // sync-enabled vault still named for a different account (or never named)
+      // is re-bound to the current account in place, without any blocking
+      // dialog. A tombstoned id (deleted on the server) is never resurrected.
+      final deletedIds = (remote['deletedVaults'] as List? ?? const [])
+          .cast<String>()
+          .toSet();
+      final serverVaults =
+          (remote['vaults'] as List? ?? const []).whereType<Json>().toList();
+      final serverVersionById = <String, int>{
+        for (final item in serverVaults)
+          item['id'] as String: item['version'] as int? ?? 0,
+      };
+      await serialized(() async {
+        if (api != client || session?.owner != owner) return;
+        for (final vault in List<Vault>.of(vaults)) {
+          if (vaultDeletionPending(vault.id) || !vault.syncEnabled) continue;
+          if (deletedIds.contains(vault.id)) {
+            // Any matching-account vault was already erased by the tombstone
+            // pass above; a remaining one is foreign/unbound and must not be
+            // silently recreated. Surface it and require an explicit action.
+            _recordSyncIssue(
+              SyncIssue(
+                vaultId: vault.id,
+                reason: SyncIssue.tombstoned,
+                owner: vault.owner,
+                sessionOwner: owner,
+              ),
+            );
+            continue;
+          }
+          if (!unlocked.containsKey(vault.id)) continue;
+          if (_ownerIsCurrent(vault.owner)) continue;
+          final serverVersion = serverVersionById[vault.id];
+          if (serverVersion != null) {
+            // The current server already owns this vault under the current
+            // account: attach to the existing copy (server version wins) and
+            // never blind-overwrite its keyWrap.
+            vault.owner = session!.owner;
+            storage.putVault(vault);
+            continue;
+          }
+          try {
+            await _rebindVaultCore(vault, 0);
+          } on ApiException catch (error) {
+            if (error.status == 410) {
+              _recordSyncIssue(
+                SyncIssue(
+                  vaultId: vault.id,
+                  reason: SyncIssue.tombstoned,
+                  owner: vault.owner,
+                  sessionOwner: owner,
+                ),
+              );
+              continue;
+            }
+            rethrow;
+          }
+        }
+      });
       await serialized(() async {
         // Capture local folders before server metadata replaces them, and decode the
         // server copy for every unlocked vault even when its version is unchanged:
@@ -2270,14 +2324,6 @@ class Notebook {
           );
           final wrap = jsonDecode(j['keyWrap'] as String) as Json;
           if (existing != null) knownLocally.add(id);
-          if (existing != null && existing.owner != session!.owner) {
-            throw StateError(
-              tr(
-                'Zdalny vault koliduje z lokalnym.',
-                'The remote vault conflicts with a local vault.',
-              ),
-            );
-          }
           final v =
               existing ??
               Vault(
@@ -2388,7 +2434,7 @@ class Notebook {
           (v) =>
               !vaultDeletionPending(v.id) &&
               v.syncEnabled &&
-              v.owner == session!.owner &&
+              _ownerIsCurrent(v.owner) &&
               unlocked.containsKey(v.id),
         )) {
           final local = knownLocally.contains(vault.id)
@@ -2566,7 +2612,7 @@ class Notebook {
         (v) =>
             !vaultDeletionPending(v.id) &&
             v.syncEnabled &&
-            v.owner == session!.owner &&
+            _ownerIsCurrent(v.owner) &&
             unlocked.containsKey(v.id),
       )) {
         await serialized(() => _finishHiddenRemoteMoves(v));
@@ -2653,19 +2699,7 @@ class Notebook {
       final pending = <Json>[];
       var size = 0;
       for (final revision in storage.pending(vault.id)) {
-        final wire = revision.toWire();
-        final outer = await _hiddenOuter(revision);
-        final images = imageReferencePattern
-            .allMatches(
-              outer['type'] == _HiddenSync.kind ||
-                      outer['type'] == _HiddenSync.configKind
-                  ? ''
-                  : Note.fromJson(outer).body,
-            )
-            .map((m) => m.group(1)!)
-            .toSet()
-            .toList();
-        if (images.isNotEmpty) wire['images'] = images;
+        final wire = await _revisionWire(vault, revision);
         final next = utf8.encode(jsonEncode(wire)).length;
         if (size + next > 3500000) break;
         pending.add(wire);
@@ -2678,6 +2712,53 @@ class Notebook {
       storage.putBatch(vault.id, batch);
     }
     await _uploadImages(vault);
+    final ids = (batch['revisions'] as List)
+        .map((r) => (r as Json)['id'] as String)
+        .toList();
+    try {
+      await _sendBatch(vault, batch);
+    } on ApiException catch (error) {
+      if (error.status != 409) rethrow;
+      if (error.message.contains('Revision ID collision')) {
+        // The server already holds these revision ids: "already sent".
+        storage.atomic(() => storage.acknowledge(vault.id, ids));
+        return;
+      }
+      if (error.message.contains('Parent revision missing')) {
+        // A pending revision references a parent this server has never seen —
+        // the vault was re-created on a fresh server. Re-mark every local
+        // revision pending so the next batch re-uploads the whole DAG starting
+        // from its roots (insertion order is parent-before-child).
+        storage.atomic(() => storage.acknowledge(vault.id, const []));
+        storage.markAllPending(vault.id);
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// Envelopes one wire revision for a batch, attaching image references for
+  /// ordinary notes and leaving hidden envelopes untouched.
+  Future<Json> _revisionWire(Vault vault, Revision revision) async {
+    final wire = revision.toWire();
+    final outer = await _hiddenOuter(revision);
+    final images = imageReferencePattern
+        .allMatches(
+          outer['type'] == _HiddenSync.kind ||
+                  outer['type'] == _HiddenSync.configKind
+              ? ''
+              : Note.fromJson(outer).body,
+        )
+        .map((m) => m.group(1)!)
+        .toSet()
+        .toList();
+    if (images.isNotEmpty) wire['images'] = images;
+    return wire;
+  }
+
+  /// Sends one durable [batch] and acknowledges it locally on a complete,
+  /// matching confirmation.
+  Future<void> _sendBatch(Vault vault, Json batch) async {
     final response = await api!.request(
       'POST',
       '/v1/vaults/${vault.id}/batches',
@@ -3170,7 +3251,7 @@ class Notebook {
     final vault = vaults.firstWhere((v) => v.id == note.vaultId);
     if (vault.owner != null) {
       if (!vault.syncEnabled ||
-          session?.owner != vault.owner ||
+          !_ownerIsCurrent(vault.owner) ||
           api == null ||
           accountKey == null) {
         throw StateError(
@@ -3439,7 +3520,7 @@ class Notebook {
     final vault = vaults.firstWhere((v) => v.id == vaultId);
     if (vault.owner != null) {
       if (!vault.syncEnabled ||
-          session?.owner != vault.owner ||
+          !_ownerIsCurrent(vault.owner) ||
           api == null ||
           accountKey == null) {
         throw StateError(
@@ -3512,7 +3593,7 @@ class Notebook {
       }
       if (vault.owner != null) {
         if (_syncing ||
-            session?.owner != vault.owner ||
+            !_ownerIsCurrent(vault.owner) ||
             api == null ||
             storage.batch(vaultId) != null ||
             storage.pending(vaultId).isNotEmpty) {
@@ -3536,7 +3617,7 @@ class Notebook {
         if (generation != _hiddenGeneration ||
             !hiddenUnlocked ||
             !unlocked.containsKey(vaultId) ||
-            session?.owner != vault.owner ||
+            !_ownerIsCurrent(vault.owner) ||
             api == null) {
           throw StateError(
             tr(
@@ -3639,7 +3720,9 @@ class Notebook {
           !storage
               .documents(_hiddenRetiredVault(vaultId))
               .containsKey(noteId)) {
-        if (_syncing || api == null || session?.owner != destination.owner) {
+        if (_syncing ||
+            api == null ||
+            !_ownerIsCurrent(destination.owner)) {
           throw StateError(
             tr(
               'Połącz konto, aby dokończyć przenoszenie notatki.',

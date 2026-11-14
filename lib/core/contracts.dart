@@ -49,6 +49,12 @@ abstract interface class NoteStorage {
   void removeDocument(String vaultId, String noteId);
   List<Revision> revisions(String vaultId, {String? noteId});
   void putRevision(Revision revision, {bool pending = false});
+
+  /// Re-marks every locally known revision of [vaultId] as pending upload, in
+  /// insertion (DAG parent-before-child) order. Used when a vault is re-created
+  /// on a new server so the whole history — not only the not-yet-acked tail —
+  /// is re-uploaded.
+  void markAllPending(String vaultId);
   List<Revision> pending(String vaultId);
   Json? batch(String vaultId);
   void putBatch(String vaultId, Json batch);

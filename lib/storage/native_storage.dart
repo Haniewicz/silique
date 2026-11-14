@@ -1262,6 +1262,12 @@ class NativeStorage implements NoteStorage {
   }
 
   @override
+  void markAllPending(String vaultId) {
+    _requireWritable(vaultId);
+    db.execute('UPDATE revisions SET pending=1 WHERE vault_id=?', [vaultId]);
+  }
+
+  @override
   Json? batch(String vaultId) {
     final rows = db.select('SELECT data FROM batches WHERE vault_id=?', [
       vaultId,

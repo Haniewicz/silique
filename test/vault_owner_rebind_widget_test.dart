@@ -18,7 +18,7 @@ const _server = 'https://example.invalid';
 Future<void> _pumpUntil(
   WidgetTester tester,
   bool Function() done, {
-  int maxFrames = 120,
+  int maxFrames = 240,
 }) async {
   for (var i = 0; i < maxFrames; i++) {
     await tester.pump(const Duration(milliseconds: 50));
@@ -32,7 +32,7 @@ Future<void> _pumpUntil(
 
 void main() {
   testWidgets(
-    'owner mismatch disables the switch but shows the reason and rebind; rebind re-enables it',
+    'owner mismatch keeps the switch live and re-binds on the next sync without a dialog',
     (tester) async {
       final dir = Directory.systemTemp.createTempSync('silique-rebind-ui-');
       final repo = Notebook(
@@ -120,35 +120,40 @@ void main() {
       SwitchListTile tile(String name) =>
           tester.widget<SwitchListTile>(find.widgetWithText(SwitchListTile, name));
 
-      // The initial device refresh finishes first, so the rebind action is live.
+      // The initial device refresh finishes first.
       await _pumpUntil(tester, () => requests.contains('GET /v1/devices'));
-      await _pumpUntil(
-        tester,
-        () => find.byKey(Key('rebind-vault-$vaultId')).evaluate().isNotEmpty,
-      );
 
-      // Switch is inactive (grey), but the reason and the rebind action are
-      // both visible.
-      expect(tile('Osobiste').onChanged, isNull);
-      expect(find.textContaining('old.example'), findsOneWidget);
-      expect(find.textContaining('old-user'), findsOneWidget);
-      final rebind = find.byKey(Key('rebind-vault-$vaultId'));
-      await tester.ensureVisible(rebind);
-      await tester.pump(const Duration(milliseconds: 50));
-      expect(find.text('Podłącz do tego konta'), findsWidgets);
-
-      await tester.tap(rebind);
-      await tester.pump(const Duration(milliseconds: 300));
-      await tester.tap(find.byKey(const Key('rebind-vault-confirm')));
-      await _pumpUntil(
-        tester,
-        () => requests.contains('PUT /v1/vaults/$vaultId'),
-      );
-      await _pumpUntil(tester, () => repo.vaults.single.owner == repo.session!.owner);
-
-      // After the rebind the switch is active again.
+      // Ownership is provenance, not a gate: the switch stays live and the
+      // tile explains the automatic re-bind without a blocking dialog/button.
       expect(tile('Osobiste').onChanged, isNotNull);
+      expect(find.textContaining('innego konta'), findsOneWidget);
       expect(find.byKey(Key('rebind-vault-$vaultId')), findsNothing);
+
+      // Toggling off disables sync locally; toggling back on re-binds the
+      // vault to the current account in place (PUT), no confirmation dialog.
+      // The tile can sit below the fold, so scroll it into view before every
+      // tap; a missed hit test would otherwise look like a product defect.
+      Future<void> toggle() async {
+        final finder = find.widgetWithText(SwitchListTile, 'Osobiste');
+        await tester.ensureVisible(finder);
+        await tester.pump();
+        await tester.tap(finder);
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+
+      await toggle();
+      expect(
+        repo.vaults.single.syncEnabled,
+        isFalse,
+        reason: 'first tap disables sync',
+      );
+      await toggle();
+      await _pumpUntil(tester, () => requests.contains('PUT /v1/vaults/$vaultId'));
+      await _pumpUntil(
+        tester,
+        () => repo.vaults.single.owner == repo.session!.owner,
+      );
+      expect(repo.vaults.single.syncEnabled, isTrue);
     },
   );
 }

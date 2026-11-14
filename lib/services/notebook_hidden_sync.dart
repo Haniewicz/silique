@@ -328,7 +328,7 @@ extension _HiddenSync on Notebook {
     }
     final vault = vaults.firstWhere((v) => v.id == note.vaultId);
     if (vault.owner != null) {
-      if (!vault.syncEnabled || session?.owner != vault.owner || api == null) {
+      if (!vault.syncEnabled || !_ownerIsCurrent(vault.owner) || api == null) {
         throw StateError(
           tr(
             'Połącz konto właściciela i włącz synchronizację.',
