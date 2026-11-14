@@ -1,3 +1,17 @@
+# Silique 0.2.52+61 — release published
+
+2026-11-14, on the owner's instruction, [Silique 0.2.52](https://github.com/Haniewicz/silique-releases/releases/tag/v0.2.52) was published: seven installers (macOS DMG, Android APK, Windows EXE/ZIP, three Linux GTK4 packages) plus `SHA256SUMS.txt`; both signed update feeds point at build 61. Source code for every package: `cba1ffa9eb8ac05abf02f6880df9c53f81bb0e94` (`main`, 0.2.52+61). Scope and notes: [0.2.52](0.2.52.md).
+
+The release adds whole-vault export: from *Manage vaults* every active note is written as a `.md` file named after its title, duplicates get ` (1)`, ` (2)`, … before the extension (case-insensitive), the vault folder tree is mirrored including empty folders, images go to `_images` with depth-relative links, the trash is skipped, and hidden notes are opt-in behind their password and land in `_hidden`. Desktop writes to a chosen directory; Android/iOS share a ZIP. No server or data-layer change.
+
+Runs: macOS/Android [43609057251](https://github.com/Haniewicz/silique-releases/actions/runs/43609057251), Windows [43609060183](https://github.com/Haniewicz/silique-releases/actions/runs/43609060183), signed preparation [43611990760](https://github.com/Haniewicz/silique-releases/actions/runs/43611990760), publication [43612230947](https://github.com/Haniewicz/silique-releases/actions/runs/43612230947) — all `success`. Candidate draft `candidate-0.2.52-61` carries the seven installers. Linux built in CT 104 (`artifacts/linux-cba1ffa9eb8a-1794670101`); `SOURCE_COMMIT` and `SHA256SUMS-Linux.txt` verified locally (`sha256sum -c`: all `OK`) before collection.
+
+Evidence: preflight on the released SHA `PREFLIGHT OK` (1175 passed, 46 skipped, `flutter analyze` clean); independent code review of the feature accepted all nine requirements; all seven published assets verified against the published `SHA256SUMS.txt` by name (all `OK`); `latest.json` payload decodes to `{"schema":1,"version":"0.2.52","build":61}` and `appcast.xml` advertises `sparkle:version="61"`, `sparkle:shortVersionString="0.2.52"` with the signed DMG enclosure. The owner explicitly waived testing on his own device for this release; that is a decision, not a test result.
+
+Housekeeping: the draft `candidate-0.2.52-61` remains (deleting releases is owner-only), as do `candidate-0.2.51-60` and older drafts. Two `tool/` contract suites (`test_linux_native_dependencies`, `test_windows_close_probe`) fail identically on the previous `dev` commit; they are pre-existing environment/stale-contract failures, not caused by this release.
+
+---
+
 # Silique 0.2.51+60 — release published
 
 2026-11-13, on the owner's instruction, [Silique 0.2.51](https://github.com/Haniewicz/silique-releases/releases/tag/v0.2.51) was published: seven installers (macOS DMG, Android APK, Windows EXE/ZIP, three Linux GTK4 packages) plus `SHA256SUMS.txt`; both signed update feeds point at build 60. Source code for every package: `ee1b22b1b1d517a925ce72849515c1c616c07c1b` (`main`, 0.2.51+60). Scope and notes: [0.2.51](0.2.51.md).
