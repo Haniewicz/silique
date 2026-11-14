@@ -114,7 +114,7 @@ void main() {
       });
       await repo.createVault('Osobiste');
       final vault = repo.vaults.single;
-      vault.version = 7;
+      vault.version = 3;
       vault.owner = 'https://old.example|old-user';
       vault.syncEnabled = true;
       repo.storage.putVault(vault);
