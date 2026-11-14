@@ -12,6 +12,7 @@ import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../storage/native_storage.dart';
+import '../storage/vault_export.dart';
 import '../storage/vault_import.dart';
 
 import '../core/contracts.dart';
@@ -24,6 +25,7 @@ import 'api.dart';
 
 part 'notebook_images.dart';
 part 'notebook_import.dart';
+part 'notebook_export.dart';
 part 'notebook_hidden_sync.dart';
 part 'notebook_vault_deletion.dart';
 

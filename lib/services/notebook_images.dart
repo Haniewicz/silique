@@ -3,6 +3,12 @@ part of 'notebook.dart';
 // Chunking keeps large photos out of the note revision DAG and below the
 // existing encrypted HTTP payload limit. There is no per-image size cap.
 const imageChunkBytes = 512 * 1024;
+
+/// Matches a `silique-image:<uuid>` reference in a note body.
+///
+/// MUST STAY IN SYNC with `imageReference` in `lib/storage/vault_export.dart` —
+/// both must match the exact same `silique-image:<uuid>` shape so the export
+/// rewrites exactly the references the reader produces.
 final imageReferencePattern = RegExp(r'silique-image:([a-f0-9-]{36})');
 
 extension NotebookImages on Notebook {

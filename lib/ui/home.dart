@@ -39,6 +39,7 @@ import 'top_pull_dismiss.dart';
 import 'mobile_note_viewport.dart';
 import 'vault_import_dialog.dart';
 import 'vault_delete_dialog.dart';
+import 'vault_export_dialog.dart';
 
 part 'home_android_widgets.dart';
 
@@ -2646,6 +2647,47 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   });
 
+  Future<void> _exportVault(Vault target) => _run(() async {
+    await _flush();
+    if (!mounted) return;
+    if (!repo.unlocked.containsKey(target.id)) {
+      final password = await askText(
+        context,
+        '',
+        titleBuilder: () =>
+            tr('Odblokuj vault przed eksportem', 'Unlock the vault before exporting'),
+        secret: true,
+        hintBuilder: () => tr('Hasło vaulta', 'Vault password'),
+      );
+      if (password == null) return;
+      try {
+        await repo.unlock(target, password: password);
+      } catch (_) {
+        if (mounted) {
+          _notify(
+            tr(
+              'Nie udało się odblokować vaulta. Sprawdź hasło.',
+              'Could not unlock the vault. Check the password.',
+            ),
+          );
+        }
+        return;
+      }
+    }
+    if (!mounted) return;
+    final current = repo.vaults.where((v) => v.id == target.id).firstOrNull;
+    if (current == null) return;
+    final result = await showVaultExportDialog(context, repo, current);
+    if (result != null) {
+      _notify(
+        tr(
+          'Wyeksportowano vault.',
+          'The vault was exported.',
+        ),
+      );
+    }
+  });
+
   Future<void> _manageVaults() async {
     await _flush();
     if (!mounted) return;
@@ -2679,6 +2721,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    IconButton(
+                      tooltip: tr('Eksportuj vault', 'Export vault'),
+                      icon: const Icon(Icons.download_outlined),
+                      onPressed: repo.vaultDeletionPending(v.id)
+                          ? null
+                          : () {
+                              Navigator.pop(ctx);
+                              unawaited(_exportVault(v));
+                            },
+                    ),
                     IconButton(
                       tooltip: tr('Zmień nazwę', 'Rename'),
                       icon: const Icon(Icons.edit_outlined),
