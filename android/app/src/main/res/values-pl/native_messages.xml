@@ -26,4 +26,8 @@
     <string name="native_update_corrupt_installer">Uszkodzony instalator.</string>
     <string name="native_update_not_newer">Instalator nie jest nowszą wersją Silique.</string>
     <string name="native_update_invalid_signature">Nieprawidłowy podpis instalatora.</string>
+    <string name="native_sync_channel_name">Synchronizacja Silique</string>
+    <string name="native_sync_channel_description">Wyświetla stałe powiadomienie podczas długiej operacji synchronizacji</string>
+    <string name="native_sync_notification_title">Silique</string>
+    <string name="native_sync_notification_message">Synchronizowanie…</string>
 </resources>

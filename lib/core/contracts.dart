@@ -91,6 +91,21 @@ abstract interface class NoteStorage {
   /// dialog reports real divergence instead of a SQL storage detail.
   int divergedNoteCount(String vaultId);
 
+  /// Begins a journaled long operation: writes a `running` row for [operation]
+  /// before the operation's first step. Local-only; never synced.
+  Future<void> startOperation(SyncOperation operation);
+
+  /// Returns every journaled operation, newest first.
+  List<SyncOperation> loadOperations();
+
+  /// Settles [operationId] to [status] (`done` or `failed`). Settling an
+  /// already-interrupted or settled row is a no-op, never a throw.
+  Future<void> settleOperation(String operationId, String status);
+
+  /// Turns every leftover `running` row into `interrupted`. Called once on
+  /// [initialize] before the resumable ones are offered for automatic resume.
+  Future<void> markInterruptedOperations();
+
   void atomic(void Function() operation);
   Future<void> mirror(Note note);
   Future<void> eraseNote(

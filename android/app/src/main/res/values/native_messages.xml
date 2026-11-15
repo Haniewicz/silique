@@ -26,4 +26,8 @@
     <string name="native_update_corrupt_installer">Corrupt installer.</string>
     <string name="native_update_not_newer">The installer is not a newer version of Silique.</string>
     <string name="native_update_invalid_signature">Invalid installer signature.</string>
+    <string name="native_sync_channel_name">Silique synchronization</string>
+    <string name="native_sync_channel_description">Shows an ongoing notification while a long sync operation runs</string>
+    <string name="native_sync_notification_title">Silique</string>
+    <string name="native_sync_notification_message">Synchronizing…</string>
 </resources>

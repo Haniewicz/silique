@@ -18,11 +18,15 @@ import 'core_test.dart' show MemoryKeys, TestCrypto;
 
 const _server = 'https://example.invalid';
 
-Future<Notebook> _repo(Directory dir) async {
+Future<Notebook> _repo(
+  Directory dir, {
+  MemoryKeys? keys,
+  TestCrypto? crypto,
+}) async {
   final repo = Notebook(
     storage: NativeStorage(dir.path),
-    keys: MemoryKeys(),
-    crypto: TestCrypto(),
+    keys: keys ?? MemoryKeys(),
+    crypto: crypto ?? TestCrypto(),
   );
   await repo.initialize();
   repo.session = Session(
@@ -56,7 +60,11 @@ void enableSync(Notebook repo, String vaultId) {
 /// most 32 parents, and purged note ids are dropped silently. This lets a reset
 /// test assert parent citation and final divergence without a real network.
 class FakeVaultServer {
-  FakeVaultServer({List<Json>? seed, Set<String>? purged}) : purged = purged ?? <String>{} {
+  FakeVaultServer({
+    List<Json>? seed,
+    Set<String>? purged,
+    this.failBatches = false,
+  }) : purged = purged ?? <String>{} {
     for (final item in seed ?? const <Json>[]) {
       _add(item);
     }
@@ -65,6 +73,7 @@ class FakeVaultServer {
   final List<Json> changes = <Json>[];
   final List<Json> revisions = <Json>[]; // stored in seq order
   final Set<String> purged;
+  final bool failBatches;
   int _seq = 0;
   final List<Json> acceptedBatches = <Json>[];
 
@@ -136,6 +145,12 @@ class FakeVaultServer {
         );
       }
       if (request.method == 'POST' && path == '/v1/vaults/$vaultId/batches') {
+        if (failBatches) {
+          return http.Response(
+            jsonEncode({'error': 'Parent revision missing'}),
+            409,
+          );
+        }
         final body = jsonDecode(request.body) as Json;
         try {
           acceptBatch(body);
@@ -230,6 +245,55 @@ Future<Json> seedLocalRevision(
     seq,
     id: localRev.id,
   );
+}
+
+/// The deterministic note id under which the source-of-truth marker lives for
+/// [vaultId], matching `Notebook._syncSourceId` exactly.
+Future<String> syncSourceId(Notebook repo, String vaultId) =>
+    repo.crypto.stableId(repo.unlocked[vaultId]!, 'sync-source:$vaultId');
+
+/// Builds an encrypted source-of-truth marker revision JSON entry that
+/// [FakeVaultServer] can serve, with the given [epoch], [parents], and [seq].
+/// The envelope matches `Notebook._makeSyncSourceMarker` so the client decodes
+/// it as a marker (opaque, never a user note).
+Future<Json> encryptMarkerForServer(
+  Notebook repo,
+  String vaultId,
+  int epoch,
+  List<String> parents,
+  int seq, {
+  String? id,
+  String? deviceId,
+  String? deviceName,
+  DateTime? at,
+}) async {
+  final revisionId = id ??
+      '00000000-0000-4000-8000-${seq.toString().padLeft(12, '0').substring(0, 12)}';
+  final sourceId = await syncSourceId(repo, vaultId);
+  final placeholder = Revision(
+    id: revisionId,
+    vaultId: vaultId,
+    noteId: sourceId,
+    parents: parents,
+    payload: '',
+  );
+  return {
+    'id': revisionId,
+    'noteId': sourceId,
+    'parents': parents,
+    'payload': await repo.crypto.seal(
+      repo.unlocked[vaultId]!,
+      jsonEncode({
+        'type': 'silique:2:sync-source',
+        'epoch': epoch,
+        'deviceId': deviceId ?? 'device-other',
+        'deviceName': deviceName ?? 'Other device',
+        'at': (at ?? DateTime.utc(2026, 1, 1, 12, 0, 0)).toIso8601String(),
+      }),
+      placeholder.aad,
+    ),
+    'seq': seq,
+  };
 }
 
 void main() {
@@ -943,6 +1007,120 @@ void main() {
         expect(tester.takeException(), isNull);
       },
     );
+
+    testWidgets(
+      'the pressed action shows only its own spinner and disables the others',
+      (tester) async {
+        late Notebook repo;
+        late Directory dir;
+        await tester.runAsync(() async {
+          dir = Directory.systemTemp.createTempSync('silique-spinner-');
+          repo = await _repo(dir);
+          await repo.createVault('Osobiste');
+          final vault = repo.vaults.single;
+          enableSync(repo, vault.id);
+          final note = await repo.createNote(vault.id);
+          // A pending edit so the flush actually builds and posts a batch,
+          // keeping the action busy while the fake endpoint hangs.
+          await repo.save(note.copyWith(body: 'pending edit for spinner'));
+        });
+        addTearDown(() async {
+          await tester.pumpWidget(const SizedBox());
+          await tester.runAsync(() async {
+            await repo.close();
+            dir.deleteSync(recursive: true);
+          });
+        });
+
+        // A delayed fake flush: no real IO, and the spinner must appear while
+        // the future is pending (no pumpAndSettle on an endless spinner).
+        final gate = Completer<void>();
+        // `forceFlushPending` fails fast without an API, so give it one whose
+        // batch POST hangs until we release the gate, keeping the action busy.
+        repo.api = SiliqueApi(
+          _server,
+          token: 'test',
+          client: MockClient((request) async {
+            if (request.method == 'POST' && request.url.path.endsWith('/batches')) {
+              await gate.future;
+              final body = jsonDecode(request.body) as Json;
+              final ids = (body['revisions'] as List)
+                  .map((r) => (r as Json)['id'] as String)
+                  .toList();
+              return http.Response(
+                jsonEncode({'batchId': body['batchId'], 'accepted': ids}),
+                200,
+              );
+            }
+            if (request.url.path.endsWith('/changes')) {
+              return http.Response(jsonEncode(_emptyChanges()), 200);
+            }
+            return http.Response('{}', 200);
+          }),
+        );
+
+        await tester.pumpWidget(
+          ProviderScope(
+            overrides: [notebookProvider.overrideWithValue(repo)],
+            child: MaterialApp(
+              home: Builder(
+                builder: (ctx) => Scaffold(
+                  body: TextButton(
+                    onPressed: () => showSyncStatusDialog(
+                      ctx,
+                      repo,
+                      repo.vaults.first,
+                    ),
+                    child: const Text('open'),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.tap(find.text('open'));
+        await tester.pumpAndSettle();
+
+        // Tap flush: only the flush button shows a spinner, the pull and reset
+        // buttons become disabled.
+        await tester.tap(find.byKey(const Key('sync-force-flush')));
+        await tester.pump();
+        await tester.pump(const Duration(milliseconds: 20));
+
+        expect(
+          find.byKey(const Key('sync-force-flush-spinner')),
+          findsOneWidget,
+        );
+        expect(
+          find.byKey(const Key('sync-force-pull-spinner')),
+          findsNothing,
+        );
+        expect(find.byKey(const Key('sync-reset-spinner')), findsNothing);
+        expect(
+          tester
+              .widget<TextButton>(find.byKey(const Key('sync-force-flush')))
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester
+              .widget<FilledButton>(find.byKey(const Key('sync-force-pull')))
+              .onPressed,
+          isNull,
+        );
+        expect(
+          tester
+              .widget<TextButton>(find.byKey(const Key('sync-reset-source')))
+              .onPressed,
+          isNull,
+        );
+
+        // Release the hanging action and settle.
+        gate.complete();
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+      },
+    );
   });
 
   group('source-of-truth reset', () {
@@ -1508,6 +1686,454 @@ void main() {
         repo.resetToLocalSourceOfTruth(vault.id),
         throwsA(isA<StateError>()),
       );
+    });
+
+    test('a reset that cannot fully drain reports an incomplete result', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-reset-stuck-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+      final note = await repo.createNote(vault.id);
+      final base = await seedLocalRevision(repo, vault.id, note, 1);
+
+      // A divergent remote head so the reset actually has work to do.
+      final remote = note.copyWith(title: 'Remote', body: 'B');
+      final b = await encryptForServer(repo, vault.id, remote, [base['id'] as String], 2);
+
+      final server = FakeVaultServer(seed: [base, b], failBatches: true);
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: server.client(vault.id),
+      );
+
+      final report = await repo.resetToLocalSourceOfTruth(vault.id);
+
+      // The queue could not fully drain: the reset must say so, not claim
+      // success, and must report the still-pending revisions.
+      expect(report.remainingPending, greaterThan(0));
+      expect(
+        report.remainingDiverged == 0 && report.remainingPending == 0,
+        isFalse,
+        reason: 'an incomplete reset must not present itself as complete',
+      );
+    });
+
+    test('a reset that drains reports zero pending revisions', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-reset-drained-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+      final note = await repo.createNote(vault.id);
+      final base = await seedLocalRevision(repo, vault.id, note, 1);
+      final b = await encryptForServer(
+        repo,
+        vault.id,
+        note.copyWith(title: 'Remote', body: 'B'),
+        [base['id'] as String],
+        2,
+      );
+
+      final server = FakeVaultServer(seed: [base, b]);
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: server.client(vault.id),
+      );
+
+      final report = await repo.resetToLocalSourceOfTruth(vault.id);
+
+      expect(report.remainingPending, 0);
+      expect(report.remainingDiverged, 0);
+      expect(repo.storage.pendingCount(vault.id), 0);
+    });
+  });
+
+  group('source-of-truth hand-off (R2)', () {
+    test('marker round-trips, keeps the highest epoch, and stays invisible', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-marker-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+      final note = await repo.createNote(vault.id);
+      final base = await seedLocalRevision(repo, vault.id, note, 1);
+
+      final marker1 = await encryptMarkerForServer(
+        repo, vault.id, 1, [], 2, deviceName: 'Device A');
+      final marker2 = await encryptMarkerForServer(
+        repo, vault.id, 2, [marker1['id'] as String], 3,
+        deviceName: 'Device B');
+
+      final server = FakeVaultServer(seed: [base, marker1, marker2]);
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: server.client(vault.id),
+      );
+
+      await repo.sync();
+
+      final status = repo.syncStatus(vault.id);
+      expect(status, isNotNull);
+      expect(status!.held, isTrue);
+      // The newest marker wins and its device identity is surfaced.
+      expect(status.sourceHoldEpoch, 2);
+      expect(status.sourceHoldDevice, 'Device B');
+
+      // Invisibility: the marker id never enters the note map, search source,
+      // or the export plan.
+      final sourceId = await syncSourceId(repo, vault.id);
+      expect(sourceId, isNot(equals(note.id)));
+      expect(repo.notes[vault.id]?.containsKey(sourceId), isNot(isTrue));
+      final export = await repo.prepareVaultExport(vault.id);
+      expect(
+        export.notes.any((n) => n.id == sourceId),
+        isFalse,
+        reason: 'the marker must never appear in the export plan',
+      );
+    });
+
+    test('a pull with a newer marker holds and changes no document, folder or metadata row', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-hold-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+      final note = await repo.createNote(vault.id);
+      final base = await seedLocalRevision(repo, vault.id, note, 1);
+
+      // A remote divergent head plus a marker. Without the hold, reconcile would
+      // materialise the remote content; with the hold it must not.
+      final remote = await encryptForServer(
+        repo, vault.id, note.copyWith(title: 'Server', body: 'SERVER'), [base['id'] as String], 2);
+      final marker = await encryptMarkerForServer(repo, vault.id, 5, [], 3);
+
+      final server = FakeVaultServer(seed: [base, remote, marker]);
+      repo.api = SiliqueApi(
+        _server, token: 'test', client: server.client(vault.id),
+      );
+
+      final beforeNotes = Map<String, Note>.of(repo.notes[vault.id]!);
+      final beforeFolders = repo.allFolders(vault.id).toList();
+      final beforeDocs = repo.storage.documents(vault.id).length;
+
+      // The shell subscribes to this stream to show the pending decision
+      // without the dialog being open, so the status write must announce itself.
+      var statusChanges = 0;
+      final subscription =
+          repo.syncStatusChanged.listen((_) => statusChanges++);
+      addTearDown(subscription.cancel);
+
+      await repo.sync();
+
+      expect(statusChanges, greaterThan(0));
+      expect(repo.syncStatus(vault.id)!.held, isTrue);
+      // No document / folder / metadata change while held.
+      expect(repo.notes[vault.id], beforeNotes);
+      expect(repo.allFolders(vault.id), beforeFolders);
+      expect(repo.storage.documents(vault.id).length, beforeDocs);
+      // The remote head was stored (cursor advanced) but not reconciled in.
+      expect(repo.notes[vault.id]![note.id]!.body, isNot('SERVER'));
+    });
+
+    test('the hold persists across a restart', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-hold-restart-');
+      final keys = MemoryKeys();
+      final crypto = TestCrypto();
+      var repo = await _repo(dir, keys: keys, crypto: crypto);
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+      final note = await repo.createNote(vault.id);
+      final base = await seedLocalRevision(repo, vault.id, note, 1);
+      final marker = await encryptMarkerForServer(repo, vault.id, 4, [], 2);
+      final server = FakeVaultServer(seed: [base, marker]);
+      repo.api = SiliqueApi(
+        _server, token: 'test', client: server.client(vault.id),
+      );
+      await repo.sync();
+      expect(repo.syncStatus(vault.id)!.held, isTrue);
+      await repo.close();
+
+      repo = await _repo(dir, keys: keys, crypto: crypto);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      expect(repo.syncStatus(vault.id)!.held, isTrue);
+      expect(repo.syncStatus(vault.id)!.sourceHoldEpoch, 4);
+    });
+
+    test('a held vault does not push, another vault still syncs', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-hold-push-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Held');
+      await repo.createVault('Normal');
+      final held = repo.vaults.first;
+      final normal = repo.vaults.last;
+      enableSync(repo, held.id);
+      enableSync(repo, normal.id);
+      await repo.createNote(held.id);
+      final normalNote = await repo.createNote(normal.id);
+      final heldBase = await seedLocalRevision(
+        repo, held.id, repo.notes[held.id]!.values.first, 1);
+      final marker = await encryptMarkerForServer(repo, held.id, 9, [], 2);
+
+      // Two independent, per-vault servers so one vault's revisions are never
+      // served (and never MAC-fail) under the other vault's key.
+      final heldServer = FakeVaultServer(seed: [heldBase, marker]);
+      final normalServer = FakeVaultServer();
+      final byId = {held.id: heldServer, normal.id: normalServer};
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/v1/vaults') {
+            return http.Response(
+              jsonEncode({'vaults': <Object>[], 'deletedVaults': <Object>[]}),
+              200,
+            );
+          }
+          if (path == '/.well-known/silique') {
+            return http.Response(
+              jsonEncode({
+                'api_version': '1',
+                'features': {'image_attachments': true},
+              }),
+              200,
+            );
+          }
+          final match = RegExp(r'^/v1/vaults/([a-f0-9-]{36})(?:/|$)')
+              .firstMatch(path);
+          final id = match?.group(1);
+          final server = id == null ? null : byId[id];
+          if (id == null || server == null) {
+            return http.Response('{}', 200);
+          }
+          if (request.method == 'POST' && path == '/v1/vaults/$id/batches') {
+            final body = jsonDecode(request.body) as Json;
+            try {
+              server.acceptBatch(body);
+            } on FormatException catch (e) {
+              return http.Response(jsonEncode({'error': e.message}), 409);
+            }
+            final ids = (body['revisions'] as List)
+                .map((r) => (r as Json)['id'] as String)
+                .toList();
+            return http.Response(
+              jsonEncode({'batchId': body['batchId'], 'accepted': ids}),
+              200,
+            );
+          }
+          if (path == '/v1/vaults/$id/changes') {
+            final cursor = int.parse(
+              request.url.queryParameters['cursor'] ?? '0',
+            );
+            return http.Response(
+              jsonEncode(server.changesSince(cursor)),
+              200,
+            );
+          }
+          return http.Response('{}', 200);
+        }),
+      );
+      await repo.sync();
+      expect(repo.syncStatus(held.id)!.held, isTrue);
+      expect(repo.syncStatus(normal.id)?.held, isNot(isTrue));
+
+      // A note authored while the vault is held must stay pending and not be
+      // uploaded (an automatic upload would create fresh divergence).
+      final heldNote = await repo.createNote(held.id);
+      await repo.sync();
+      expect(repo.syncStatus(held.id)!.held, isTrue);
+      expect(repo.storage.pendingCount(held.id), greaterThan(0));
+      expect(
+        heldServer.revisions.any((r) => r['noteId'] == heldNote.id),
+        isFalse,
+      );
+
+      // The normal vault still syncs its note (its pending revision drains).
+      await repo.save(normalNote.copyWith(body: 'NORMAL EDIT'));
+      await repo.sync();
+      expect(repo.storage.pendingCount(normal.id), 0);
+    });
+
+    test('without a decision nothing changes; adopt clears the hold and converges', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-adopt-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+      final note = await repo.createNote(vault.id);
+      final base = await seedLocalRevision(repo, vault.id, note, 1);
+      final remote = await encryptForServer(
+        repo, vault.id, note.copyWith(title: 'Server', body: 'SERVER'),
+        [base['id'] as String], 2);
+      final marker = await encryptMarkerForServer(repo, vault.id, 7, [], 3);
+
+      final server = FakeVaultServer(seed: [base, remote, marker]);
+      repo.api = SiliqueApi(
+        _server, token: 'test', client: server.client(vault.id),
+      );
+
+      await repo.sync();
+      expect(repo.syncStatus(vault.id)!.held, isTrue);
+
+      // No decision → nothing changes even after another pass.
+      await repo.sync();
+      expect(repo.syncStatus(vault.id)!.held, isTrue);
+      expect(repo.notes[vault.id]![note.id]!.body, isNot('SERVER'));
+
+      // Adopt without a backup: hold clears and the server content converges.
+      await repo.adoptSourceOfTruth(vault.id, backupFirst: false);
+      expect(repo.syncStatus(vault.id)?.held, isNot(isTrue));
+      expect(repo.syncStatus(vault.id)!.sourceEpochApplied, 7);
+      expect(repo.notes[vault.id]![note.id]!.body, 'SERVER');
+
+      // A second adopt is a no-op.
+      final applied = repo.syncStatus(vault.id)!.sourceEpochApplied;
+      await repo.adoptSourceOfTruth(vault.id, backupFirst: false);
+      expect(repo.syncStatus(vault.id)!.sourceEpochApplied, applied);
+    });
+
+    test('local-only notes survive adoption and sync through the normal channel', () async {
+      final dir = Directory.systemTemp.createTempSync('silique-adopt-pending-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      enableSync(repo, vault.id);
+
+      final marker = await encryptMarkerForServer(repo, vault.id, 3, [], 1);
+      final server = FakeVaultServer(seed: [marker]);
+      repo.api = SiliqueApi(
+        _server, token: 'test', client: server.client(vault.id),
+      );
+
+      // Establish the hold first, so any later local work is queued behind it.
+      await repo.sync();
+      expect(repo.syncStatus(vault.id)!.held, isTrue);
+
+      // A note authored while held has no server head: it is local-only.
+      final note = await repo.createNote(vault.id);
+      await repo.save(note.copyWith(body: 'LOCAL ONLY'));
+      expect(repo.storage.pendingCount(vault.id), greaterThan(0));
+
+      await repo.adoptSourceOfTruth(vault.id, backupFirst: false);
+      // Adoption must not discard the local-only note: it is still present and,
+      // because it has no server head to be superseded by, it is pushed through
+      // the normal channel instead of being acknowledged away.
+      expect(repo.syncStatus(vault.id)?.held, isNot(isTrue));
+      expect(repo.notes[vault.id]![note.id]!.body, 'LOCAL ONLY');
+      expect(
+        server.revisions.any((r) => r['noteId'] == note.id),
+        isTrue,
+        reason: 'the local-only note must reach the server, not be stranded',
+      );
+    });
+
+    testWidgets('status dialog shows the held banner and the three-action decision', (tester) async {
+      late Notebook repo;
+      late Directory dir;
+      late String vaultId;
+      await tester.runAsync(() async {
+        dir = Directory.systemTemp.createTempSync('silique-hold-dialog-');
+        repo = await _repo(dir);
+        await repo.createVault('Osobiste');
+        final vault = repo.vaults.single;
+        vaultId = vault.id;
+        enableSync(repo, vaultId);
+        await repo.createNote(vaultId);
+        // Place the vault into the held state without any network IO.
+        repo.storage.putSyncStatus(
+          vaultId,
+          VaultSyncStatus(
+            sourceEpochApplied: 0,
+            sourceHoldEpoch: 6,
+            sourceHoldDevice: 'Tablet',
+            sourceHoldAt: DateTime.utc(2026, 1, 1, 12, 0, 0).toIso8601String(),
+          ),
+        );
+      });
+      addTearDown(() async {
+        await tester.pumpWidget(const SizedBox());
+        final close = repo.close();
+        await tester.runAsync(() async {
+          await close;
+          dir.deleteSync(recursive: true);
+        });
+      });
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [notebookProvider.overrideWithValue(repo)],
+          child: MaterialApp(
+            home: Builder(
+              builder: (ctx) => Scaffold(
+                body: TextButton(
+                  onPressed: () => showSyncStatusDialog(
+                    ctx,
+                    repo,
+                    repo.vaults.first,
+                  ),
+                  child: const Text('open'),
+                ),
+              ),
+            ),
+          ),
+        ),
+      );
+
+      await tester.tap(find.text('open'));
+      await tester.pumpAndSettle();
+
+      expect(find.byKey(const Key('sync-hold-banner')), findsOneWidget);
+      expect(find.textContaining('Tablet'), findsWidgets);
+      // The adopt entry point is reachable from the status dialog.
+      expect(find.byKey(const Key('sync-adopt')), findsOneWidget);
+
+      // Opening the decision dialog (no IO on open) exposes exactly three actions.
+      await tester.tap(find.byKey(const Key('sync-adopt')));
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('sync-source-backup-adopt')), findsOneWidget);
+      expect(find.byKey(const Key('sync-source-adopt')), findsOneWidget);
+      expect(find.byKey(const Key('sync-source-later')), findsOneWidget);
+
+      // "later" dismisses with no adoption: the vault stays held.
+      await tester.tap(find.byKey(const Key('sync-source-later')));
+      await tester.pumpAndSettle();
+      expect(repo.syncStatus(vaultId)!.held, isTrue);
     });
   });
 }

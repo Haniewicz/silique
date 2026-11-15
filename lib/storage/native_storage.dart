@@ -691,6 +691,9 @@ class NativeStorage implements NoteStorage {
       db.execute(
         'CREATE TABLE IF NOT EXISTS vault_deletion_cleanup(vault_id TEXT PRIMARY KEY)',
       );
+      db.execute(
+        'CREATE TABLE IF NOT EXISTS sync_operations(id TEXT PRIMARY KEY,kind TEXT NOT NULL,vault_id TEXT,data TEXT,started_at INTEGER NOT NULL,status TEXT NOT NULL)',
+      );
       for (final table in [
         'vaults',
         'documents',
@@ -700,6 +703,7 @@ class NativeStorage implements NoteStorage {
         'image_assets',
         'image_chunks',
         'sync_state',
+        'sync_operations',
       ]) {
         final column = table == 'vaults' ? 'id' : 'vault_id';
         String blocked(String row) {
@@ -1097,6 +1101,7 @@ class NativeStorage implements NoteStorage {
         'batches',
         'cursors',
         'sync_state',
+        'sync_operations',
       ]) {
         db.execute(
           'DELETE FROM $table WHERE vault_id IN (?,?,?,?,?)',
@@ -1350,6 +1355,61 @@ class NativeStorage implements NoteStorage {
     db.execute('INSERT OR REPLACE INTO sync_state VALUES(?,?)', [
       vaultId,
       jsonEncode(status.toJson()),
+    ]);
+  }
+
+  @override
+  Future<void> startOperation(SyncOperation operation) async {
+    db.execute(
+      'INSERT OR REPLACE INTO sync_operations VALUES(?,?,?,?,?,?)',
+      [
+        operation.id,
+        operation.kind,
+        operation.vaultId,
+        operation.data,
+        operation.startedAt.millisecondsSinceEpoch,
+        operation.status,
+      ],
+    );
+  }
+
+  @override
+  List<SyncOperation> loadOperations() {
+    final operations = db
+        .select('SELECT * FROM sync_operations ORDER BY started_at DESC')
+        .map(
+          (row) => SyncOperation(
+            id: row['id'] as String,
+            kind: row['kind'] as String,
+            vaultId: row['vault_id'] as String?,
+            data: row['data'] as String?,
+            startedAt: DateTime.fromMillisecondsSinceEpoch(
+              row['started_at'] as int,
+              isUtc: true,
+            ),
+            status: row['status'] as String,
+          ),
+        )
+        .toList();
+    return operations;
+  }
+
+  @override
+  Future<void> settleOperation(String operationId, String status) async {
+    // A settle is a terminal write. Only a `running` row can settle, so a crash
+    // that already settled (or startup that already interrupted) is never
+    // overwritten by a late `finally`.
+    db.execute(
+      'UPDATE sync_operations SET status=? WHERE id=? AND status=?',
+      [status, operationId, SyncOperation.statusRunning],
+    );
+  }
+
+  @override
+  Future<void> markInterruptedOperations() async {
+    db.execute('UPDATE sync_operations SET status=? WHERE status=?', [
+      SyncOperation.statusInterrupted,
+      SyncOperation.statusRunning,
     ]);
   }
 

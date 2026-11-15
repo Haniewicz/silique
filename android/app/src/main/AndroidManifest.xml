@@ -2,6 +2,9 @@
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <application
         android:label="Silique"
         android:allowBackup="false"
@@ -40,6 +43,10 @@
         <activity android:name="pl.silique.app.WidgetSearchActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/WidgetSearchTheme" android:windowSoftInputMode="adjustResize" />
         <activity android:name="pl.silique.app.WidgetActionActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/WidgetActionTheme" android:noHistory="true" />
         <service android:name="pl.silique.app.widgets.NotesRemoteViewsService" android:exported="false" android:permission="android.permission.BIND_REMOTEVIEWS" />
+        <service
+            android:name="pl.silique.app.SiliqueSyncService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync" />
         <receiver android:name="pl.silique.app.widgets.NoteListWidget" android:exported="false" android:label="@string/widget_notes_description">
             <intent-filter><action android:name="android.appwidget.action.APPWIDGET_UPDATE" /></intent-filter>
             <meta-data android:name="android.appwidget.provider" android:resource="@xml/widget_notes_info" />

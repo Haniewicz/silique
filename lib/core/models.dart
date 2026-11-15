@@ -222,12 +222,30 @@ class VaultSyncStatus {
     this.lastAttemptAt,
     this.lastError,
     this.lastErrorAt,
+    this.sourceEpochApplied = 0,
+    this.sourceHoldEpoch,
+    this.sourceHoldDevice,
+    this.sourceHoldAt,
   });
 
   final DateTime? lastSuccessAt;
   final DateTime? lastAttemptAt;
   final String? lastError;
   final DateTime? lastErrorAt;
+
+  /// The highest source-of-truth epoch this device has applied (adopted or
+  /// reset into). A pull that finds a marker with a higher epoch places the
+  /// vault into the hold until the owner decides.
+  final int sourceEpochApplied;
+
+  /// The marker epoch the vault is currently held on, or null when not held.
+  final int? sourceHoldEpoch;
+
+  /// The device name (or id, as a fallback) carried by the held marker.
+  final String? sourceHoldDevice;
+
+  /// The ISO timestamp carried by the held marker's `at` field.
+  final String? sourceHoldAt;
 
   /// True when the most recent recorded failure is newer than the most recent
   /// success (or there was never a success). A vault that has never attempted
@@ -237,11 +255,20 @@ class VaultSyncStatus {
       (lastSuccessAt == null ||
           (lastErrorAt != null && lastErrorAt!.isAfter(lastSuccessAt!)));
 
+  /// True when a pull observed a source-of-truth marker newer than what this
+  /// device has applied, and the owner has not yet decided. A held vault is
+  /// waiting for a decision, not failing.
+  bool get held => sourceHoldEpoch != null && sourceHoldEpoch! > sourceEpochApplied;
+
   Json toJson() => {
     'lastSuccessAt': lastSuccessAt?.toIso8601String(),
     'lastAttemptAt': lastAttemptAt?.toIso8601String(),
     'lastError': lastError,
     'lastErrorAt': lastErrorAt?.toIso8601String(),
+    'sourceEpochApplied': sourceEpochApplied,
+    'sourceHoldEpoch': sourceHoldEpoch,
+    'sourceHoldDevice': sourceHoldDevice,
+    'sourceHoldAt': sourceHoldAt,
   };
 
   factory VaultSyncStatus.fromJson(Json j) => VaultSyncStatus(
@@ -255,6 +282,10 @@ class VaultSyncStatus {
     lastErrorAt: j['lastErrorAt'] == null
         ? null
         : DateTime.parse(j['lastErrorAt'] as String),
+    sourceEpochApplied: j['sourceEpochApplied'] as int? ?? 0,
+    sourceHoldEpoch: j['sourceHoldEpoch'] as int?,
+    sourceHoldDevice: j['sourceHoldDevice'] as String?,
+    sourceHoldAt: j['sourceHoldAt'] as String?,
   );
 }
 
@@ -300,6 +331,7 @@ class VaultResetReport {
     required this.copiesKept,
     required this.headsMerged,
     required this.remainingDiverged,
+    required this.remainingPending,
     required this.hiddenSkipped,
   });
 
@@ -321,6 +353,70 @@ class VaultResetReport {
   /// successful reset reports exactly zero.
   final int remainingDiverged;
 
+  /// Revisions still pending after the reset's final drain. A fully successful
+  /// reset reports exactly zero; a non-zero value means the reset is incomplete.
+  final int remainingPending;
+
   /// Hidden notes that the reset deliberately left untouched.
   final int hiddenSkipped;
+}
+
+/// One journaled long sync operation (full pull, flush, reset, adopt). The row
+/// is written before the operation starts and settled in `finally`, so a crash
+/// or a process death leaves an observable `running` row that startup turns into
+/// `interrupted`. Local-only; never synced to the server.
+class SyncOperation {
+  const SyncOperation({
+    required this.id,
+    required this.kind,
+    required this.startedAt,
+    required this.status,
+    this.vaultId,
+    this.data,
+  });
+
+  /// Journal kinds, matching the long operations the notebook journals.
+  static const kindPull = 'pull';
+  static const kindFlush = 'flush';
+  static const kindReset = 'reset';
+  static const kindAdopt = 'adopt';
+
+  /// Journal status values.
+  static const statusRunning = 'running';
+  static const statusDone = 'done';
+  static const statusFailed = 'failed';
+  static const statusInterrupted = 'interrupted';
+
+  final String id;
+  final String kind;
+  final String? vaultId;
+  final String? data;
+  final DateTime startedAt;
+  final String status;
+
+  bool get running => status == statusRunning;
+
+  /// Resumable kinds resume automatically once the vault is unlocked and its
+  /// owner is current, because each of them is idempotent. Adoption is never
+  /// resumed: it always needs a fresh owner decision.
+  bool get resumable =>
+      kind == kindPull || kind == kindFlush || kind == kindReset;
+
+  Json toJson() => {
+    'id': id,
+    'kind': kind,
+    'vaultId': vaultId,
+    'data': data,
+    'startedAt': startedAt.toIso8601String(),
+    'status': status,
+  };
+
+  factory SyncOperation.fromJson(Json j) => SyncOperation(
+    id: j['id'] as String,
+    kind: j['kind'] as String,
+    vaultId: j['vaultId'] as String?,
+    data: j['data'] as String?,
+    startedAt: DateTime.parse(j['startedAt'] as String),
+    status: j['status'] as String,
+  );
 }

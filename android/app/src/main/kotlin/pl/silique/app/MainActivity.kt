@@ -33,6 +33,7 @@ class MainActivity : FlutterActivity() {
     private var vaultImporter: SiliqueImport? = null
     private var widgets: SiliqueWidgets? = null
     private var imageClipboard: SiliqueClipboard? = null
+    private var background: SiliqueBackground? = null
     private var credentialDirectoryChannel: MethodChannel? = null
     private var language: SiliqueLanguageBridge? = null
 
@@ -81,6 +82,8 @@ class MainActivity : FlutterActivity() {
         vaultImporter = SiliqueImport(this, flutterEngine.dartExecutor.binaryMessenger)
         imageClipboard?.dispose()
         imageClipboard = SiliqueClipboard(this, flutterEngine.dartExecutor.binaryMessenger)
+        background?.dispose()
+        background = SiliqueBackground(this, flutterEngine.dartExecutor.binaryMessenger)
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, channelName)
             .setMethodCallHandler { call, result ->
                 when (call.method) {
@@ -171,6 +174,7 @@ class MainActivity : FlutterActivity() {
         widgets?.dispose()
         imageClipboard?.dispose()
         vaultImporter?.dispose()
+        background?.dispose()
         super.onDestroy()
     }
 

@@ -133,6 +133,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   StreamSubscription<WidgetAction>? _widgetActions;
   Future<void> _widgetTail = Future<void>.value();
   StreamSubscription<void>? _hiddenChanges;
+  StreamSubscription<void>? _syncStatusChanges;
   Timer? _hiddenWatch;
   final _hiddenNotes = <String, Note>{};
   final _editorImages = <ImageProvider<Object>>{};
@@ -635,6 +636,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _localChanges = repo.localChanges.listen(
       (_) => _syncCoordinator.localChanged(),
     );
+    // A vault waiting for a source-of-truth decision must say so in the shell,
+    // not only inside the sync status dialog: the status write happens on a
+    // background pass, so subscribe instead of relying on the next rebuild.
+    _syncStatusChanges = repo.syncStatusChanged.listen((_) {
+      if (mounted) setState(() {});
+    });
     _syncCoordinator.start();
     _hiddenChanges = repo.hiddenStateChanges.listen((_) {
       // The deletion stream independently wipes ordinary selected editors.
@@ -841,6 +848,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     unawaited(_androidWidgets.dispose());
     _hiddenWatch?.cancel();
     unawaited(_hiddenChanges?.cancel());
+    unawaited(_syncStatusChanges?.cancel());
     _evictEditorImages();
     if (_inHidden) {
       _loading = true;
@@ -2718,6 +2726,59 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   });
 
+  /// Shell banner shown while the current vault waits for a source-of-truth
+  /// decision. Adoption is always explicit, so this only announces the wait and
+  /// opens the dialog that holds the three-action decision; it never downloads,
+  /// overwrites or acknowledges anything by itself.
+  Widget _sourceHoldBanner() {
+    final id = _vaultId;
+    if (id == null) return const SizedBox.shrink();
+    final status = repo.syncStatus(id);
+    if (status == null || !status.held) return const SizedBox.shrink();
+    final vault = repo.vaults.where((v) => v.id == id).firstOrNull;
+    if (vault == null) return const SizedBox.shrink();
+    final device =
+        status.sourceHoldDevice ?? tr('inne urządzenie', 'another device');
+    return Material(
+      color: syncOff.withValues(alpha: 0.10),
+      child: InkWell(
+        key: const Key('sync-hold-shell-banner'),
+        onTap: () => unawaited(_openSyncStatus(vault)),
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 8),
+          child: Row(
+            children: [
+              const Icon(Icons.sync_problem, size: 18, color: syncOff),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  tr(
+                    'Urządzenie „$device” ustawiło się jako źródło prawdy. '
+                    'Nowa wersja z serwera czeka na Twoją decyzję — nic nie '
+                    'zostało pobrane.',
+                    'Device “$device” set itself as the source of truth. The new '
+                    'server version waits for your decision — nothing has been '
+                    'downloaded.',
+                  ),
+                  style: const TextStyle(fontSize: 12, height: 1.3),
+                ),
+              ),
+              const SizedBox(width: 8),
+              const Text(
+                'Pokaż / Show',
+                style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: syncOff,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   Future<void> _openSyncStatus(Vault v) async {
     if (!mounted) return;
     await showSyncStatusDialog(context, repo, v);
@@ -3071,6 +3132,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       else
                         Column(
                           children: [
+                            _sourceHoldBanner(),
                             Expanded(
                               child: Row(
                                 children: [

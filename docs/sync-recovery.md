@@ -161,3 +161,104 @@ tests.
 - UI: dialog renders counts and requires the explicit confirmation; fail-fast
   before IO.
 - Whole suite green, `flutter analyze` clean.
+---
+
+# 0.2.57 — source-of-truth hand-off, visible progress, Android keep-alive
+
+Four owner requirements follow the 0.2.56 release. Scope: client only, the server
+contract is still untouched.
+
+## R1. A reset finishes with a full upload
+
+`resetToLocalSourceOfTruth` previously drained the queue with the same bounded loop
+`forceFlushPending` uses, so a large vault could return while revisions were still
+queued. The reset now ends with an explicit full drain (bounded, but until the queue
+is actually empty) followed by one final pull, and verifies **both** invariants:
+zero diverged notes **and** zero pending revisions. The report carries
+`remainingPending`; when either invariant fails the result says the reset is
+incomplete instead of reporting success.
+
+## R2. Cross-device hand-off, with adoption blocked until the user decides
+
+The server stays a dumb store, so the signal travels inside the vault DAG.
+
+- **Marker.** A revision whose payload is an envelope
+  `{"type":"silique:2:sync-source","epoch":int,"deviceId":string?,"deviceName":string?,"at":iso}`,
+  stored under the deterministic note id `crypto.stableId(vaultKey, 'sync-source:<vaultId>')`.
+  Each reset writes one, last, with `epoch = maxKnownEpoch + 1` and parents = the
+  marker's current heads. Every reset is therefore ordered after the content it
+  describes.
+- **Invisible everywhere.** The marker id is an internal identity: it must never
+  reach the note map, reconcile, folder views, search, vault export, or the Android
+  widgets. Treat it exactly like the hidden-note envelopes: skipped while decoding,
+  never materialised.
+- **Hold.** `VaultSyncStatus` gains `sourceEpochApplied`, `sourceHoldEpoch`,
+  `sourceHoldDevice`, `sourceHoldAt`. When a pull decodes a marker with
+  `epoch > sourceEpochApplied`, the vault enters the hold state: revisions are
+  stored and the cursor advances, but **reconcile and the image cache are skipped**
+  for that vault, so no note, folder or metadata changes. While held, the vault also
+  does not push (an automatic upload would create fresh divergence); it syncs again
+  only through an explicit owner action. The hold is persisted, survives a restart,
+  and is independent per vault: other vaults keep syncing normally.
+- **Decision.** A banner and a dialog name the device and the time, show how many
+  local notes and pending revisions would be replaced, and offer exactly three
+  actions: "Zapisz kopię i pobierz" (vault export first — desktop directory, mobile
+  ZIP + share, the existing export feature), "Pobierz wersję z serwera" (adopt
+  without a copy), "Później" (nothing changes). Nothing is adopted without that
+  decision; "later" leaves the vault held.
+- **Adopt.** `adoptSourceOfTruth(vaultId, {required bool backupFirst})`: optional
+  export, then acknowledge only the ordinary pending revisions the server head
+  actually supersedes (same filter as the reset: local-only notes and hidden
+  revisions stay pending), set `sourceEpochApplied = sourceHoldEpoch`, clear the
+  hold, and reconcile + push. Idempotent.
+- Regression gate: after a pull that discovers a newer marker, **no** document,
+  folder or metadata row may change.
+
+## R3. Progress on the pressed action
+
+The dialog tracks `_busyAction` (`null`, `flush`, `pull`, `reset`, `adopt`) instead
+of one boolean. The pressed button shows an 18 px `CircularProgressIndicator` and
+the remaining actions are disabled. Keys: `sync-force-flush-spinner`,
+`sync-force-pull-spinner`, `sync-reset-spinner`, `sync-adopt-spinner`.
+
+## R4. Android: an operation survives the app being backgrounded
+
+Two layers, because keeping the process alive is not enough on its own.
+
+- **Journal.** New local table
+  `sync_operations(id TEXT PRIMARY KEY, kind TEXT NOT NULL, vault_id TEXT, data TEXT, started_at INTEGER NOT NULL, status TEXT NOT NULL)`
+  with `running` / `done` / `failed`. Every long operation (full pull, flush,
+  reset, adopt) writes a row before it starts and settles it in `finally`. On
+  startup any leftover `running` row becomes `interrupted` and is surfaced in the
+  sync status dialog as "Dokończ operację". An interrupted full pull, flush or
+  reset resumes automatically once the vault is unlocked and its owner is current
+  (each of them is idempotent); an interrupted adopt is **never** resumed
+  automatically, because adoption always needs a fresh owner decision.
+- **Foreground service.** Kotlin `SiliqueSyncService` (foreground, `dataSync`
+  type) plus the channel `silique.notes/background` (`start` with a title/message,
+  `stop`), a localised `silique-sync` notification channel, an ongoing low-importance
+  notification whose tap opens the app, and the manifest declarations plus
+  `FOREGROUND_SERVICE`, `FOREGROUND_SERVICE_DATA_SYNC`, `POST_NOTIFICATIONS`.
+  Dart wrapper `lib/storage/native_background_task.dart`; no-op outside Android;
+  started before a long operation and stopped in `finally`. Mirror the existing
+  native patterns (`SiliqueWidgets`, `SiliqueClipboard`) instead of inventing a
+  new bridge style.
+
+## R5. Tests required for 0.2.57
+
+- Reset reports and verifies `pending == 0`; an incomplete drain is reported as
+  incomplete.
+- Marker round-trip, epoch ordering, and invisibility: not in the note list, not in
+  the export plan, not in search, not in the widget snapshot.
+- Hold: after a pull with a newer marker **no** document/folder/metadata changes;
+  the hold persists across a restart; another vault still syncs; the vault does not
+  push while held.
+- Adopt: without the decision nothing changes; with a copy the export runs before
+  adoption; local-only notes and hidden revisions stay pending; second adopt is a
+  no-op; convergence to zero divergence.
+- Journal: a running row becomes interrupted on startup; resumable kinds resume,
+  adopt does not; `finally` settles the row on success and on error.
+- UI: per-action spinners, the hold banner, the three-action decision dialog,
+  fail-fast before IO.
+- Kotlin compiles (verified by the release APK build); `flutter analyze` clean;
+  whole suite green.

@@ -12,6 +12,8 @@ import 'package:uuid/uuid.dart';
 import 'package:path_provider/path_provider.dart';
 
 import '../storage/native_storage.dart';
+import '../storage/native_files.dart';
+import '../storage/native_background_task.dart';
 import '../storage/vault_export.dart';
 import '../storage/vault_import.dart';
 
@@ -82,12 +84,15 @@ class Notebook {
     required KeyStore keys,
     required this.crypto,
     ServerTrust? trust,
-  }) : trust = trust ?? ServerTrust(store: InMemoryTrustStore()) {
+    NativeBackgroundTask? background,
+  }) : trust = trust ?? ServerTrust(store: InMemoryTrustStore()),
+       background = background ?? NativeBackgroundTask() {
     this.keys = keys is CredentialModeControl
         ? _NotebookCredentialKeys(this, keys, keys as CredentialModeControl)
         : _NotebookKeys(this, keys);
   }
   final ServerTrust trust;
+  final NativeBackgroundTask background;
   NoteStorage storage;
   List<Json>? devices;
   String? _lastVaultId;
@@ -280,6 +285,17 @@ class Notebook {
   final List<SyncIssue> syncIssues = <SyncIssue>[];
   final _syncIssuesChanged = StreamController<void>.broadcast(sync: true);
   Stream<void> get syncIssuesChanged => _syncIssuesChanged.stream;
+
+  /// Emits whenever a vault's persisted sync status changes (a pass settled, a
+  /// source-of-truth marker was observed, or a hold was adopted/cleared), so the
+  /// shell can show a pending source-of-truth decision without being opened.
+  final _syncStatusChanged = StreamController<void>.broadcast(sync: true);
+  Stream<void> get syncStatusChanged => _syncStatusChanged.stream;
+
+  /// Notifies listeners of [syncStatusChanged]; called after every status write.
+  void _notifySyncStatus() {
+    if (!_syncStatusChanged.isClosed) _syncStatusChanged.add(null);
+  }
   String? mirrorWarning;
   List<Vault> get vaults => storage.vaults().map((v) {
     // The protected name in storage is a fixed redaction marker, not user data.
@@ -342,6 +358,172 @@ class Notebook {
     )) {
       await unlock(vault);
     }
+    await storage.markInterruptedOperations();
+    // Automatic resume fires only when a cached session already wired the api;
+    // otherwise the app calls [resumeInterruptedOperations] once it is online.
+    if (api != null && session != null) {
+      await resumeInterruptedOperations();
+    }
+  }
+
+  /// Re-runs the resumable interrupted operations whose vault is now unlocked
+  /// and owned by the current account. Full pull, flush and reset are all
+  /// idempotent, so each is resumed automatically; adopt is never resumed
+  /// because adoption always needs a fresh owner decision. Already-settled or
+  /// ineligible rows (locked vault, foreign owner, no connection) are skipped.
+  Future<void> resumeInterruptedOperations() async {
+    if (_syncing) return;
+    if (api == null || session == null) return;
+    for (final op in storage.loadOperations()) {
+      if (op.status != SyncOperation.statusInterrupted) continue;
+      if (!op.resumable) continue;
+      final id = op.vaultId;
+      if (id == null) continue;
+      if (!unlocked.containsKey(id)) continue;
+      final vault = vaults.where((v) => v.id == id).firstOrNull;
+      if (vault == null || !vault.syncEnabled) continue;
+      if (!_ownerIsCurrent(vault.owner)) continue;
+      switch (op.kind) {
+        case SyncOperation.kindPull:
+          await _resumeForceFullPull(id);
+        case SyncOperation.kindFlush:
+          await _resumeForceFlushPending(id);
+        case SyncOperation.kindReset:
+          await _resumeReset(id, op.data);
+      }
+    }
+  }
+
+  /// Runs a long operation under the journal + Android foreground service:
+  /// a `running` row is written before the first step, the background service is
+  /// started, and both are settled/stopped in `finally` regardless of success,
+  /// error or cancellation. The background service is a progress marker, never a
+  /// gate — its failure is swallowed inside [NativeBackgroundTask], so it cannot
+  /// abort the sync it decorates.
+  Future<T> _journaled<T>(
+    String kind,
+    String? vaultId,
+    Future<T> Function() body, {
+    String? data,
+    SyncOperation? resume,
+  }) async {
+    final op = resume ??
+        SyncOperation(
+          id: _uuid.v4(),
+          kind: kind,
+          vaultId: vaultId,
+          data: data,
+          startedAt: DateTime.now().toUtc(),
+          status: SyncOperation.statusRunning,
+        );
+    if (resume == null) {
+      await storage.startOperation(op);
+    } else {
+      // A resumed row was already `interrupted`; re-mark it running so a second
+      // crash still surfaces, then settle it in the finally below.
+      await storage.startOperation(
+        SyncOperation(
+          id: op.id,
+          kind: op.kind,
+          vaultId: op.vaultId,
+          data: op.data,
+          startedAt: op.startedAt,
+          status: SyncOperation.statusRunning,
+        ),
+      );
+    }
+    try {
+      final value = await withBackgroundTask(
+        body,
+        background: background,
+        title: tr('Synchronizacja Silique', 'Silique synchronization'),
+        message: tr('Synchronizowanie…', 'Synchronizing…'),
+      );
+      await storage.settleOperation(op.id, SyncOperation.statusDone);
+      return value;
+    } catch (_) {
+      await storage.settleOperation(op.id, SyncOperation.statusFailed);
+      rethrow;
+    }
+  }
+
+  /// Automatic resume of an interrupted full pull: the body is idempotent
+  /// (cursor reset to 0 + full replay), so re-running it is safe.
+  Future<void> _resumeForceFullPull(String vaultId) async {
+    if (_syncing) return;
+    final op = storage
+        .loadOperations()
+        .where(
+          (o) =>
+              o.status == SyncOperation.statusInterrupted &&
+              o.kind == SyncOperation.kindPull &&
+              o.vaultId == vaultId,
+        )
+        .firstOrNull;
+    if (op == null) return;
+    await _operation(
+      () => _journaled(
+        SyncOperation.kindPull,
+        vaultId,
+        () => _forceFullPull(vaultId: vaultId),
+        resume: op,
+      ),
+      failureKey: 'force-full-pull',
+    );
+  }
+
+  /// Automatic resume of an interrupted flush (idempotent bounded drain).
+  Future<void> _resumeForceFlushPending(String vaultId) async {
+    if (_syncing) return;
+    final op = storage
+        .loadOperations()
+        .where(
+          (o) =>
+              o.status == SyncOperation.statusInterrupted &&
+              o.kind == SyncOperation.kindFlush &&
+              o.vaultId == vaultId,
+        )
+        .firstOrNull;
+    if (op == null) return;
+    await _operation(
+      () => _journaled(
+        SyncOperation.kindFlush,
+        vaultId,
+        () => _forceFlushPending(vaultId: vaultId),
+        resume: op,
+      ),
+      failureKey: 'force-flush-pending',
+    );
+  }
+
+  /// Automatic resume of an interrupted source-of-truth reset. The reset's
+  /// copy/chain ids are deterministic, so re-running is idempotent.
+  Future<void> _resumeReset(String vaultId, String? data) async {
+    if (_syncing) return;
+    final op = storage
+        .loadOperations()
+        .where(
+          (o) =>
+              o.status == SyncOperation.statusInterrupted &&
+              o.kind == SyncOperation.kindReset &&
+              o.vaultId == vaultId,
+        )
+        .firstOrNull;
+    if (op == null) return;
+    final keepLosingCopies = data != 'false';
+    await _operation(
+      () => _journaled(
+        SyncOperation.kindReset,
+        vaultId,
+        () => _resetToLocalSourceOfTruth(
+          vaultId,
+          keepLosingCopies: keepLosingCopies,
+        ),
+        data: data,
+        resume: op,
+      ),
+      failureKey: 'reset-source-of-truth',
+    );
   }
 
   Future<String> _accountSlot(String owner) async =>
@@ -2154,6 +2336,10 @@ class Notebook {
   /// Locally recorded sync status for [vaultId], or null when never recorded.
   VaultSyncStatus? syncStatus(String vaultId) => storage.syncStatus(vaultId);
 
+  /// Every journaled long operation, newest first. Local-only; the dialog uses
+  /// this to surface an `interrupted` row as "Finish the operation".
+  List<SyncOperation> syncOperations() => storage.loadOperations();
+
   /// Revisions of [vaultId] still awaiting an upload acknowledgement.
   int pendingCount(String vaultId) => storage.pendingCount(vaultId);
 
@@ -2180,7 +2366,11 @@ class Notebook {
       );
     }
     return _operation(
-      () => _forceFullPull(vaultId: vaultId),
+      () => _journaled(
+        SyncOperation.kindPull,
+        vaultId,
+        () => _forceFullPull(vaultId: vaultId),
+      ),
       failureKey: 'force-full-pull',
     );
   }
@@ -2270,6 +2460,10 @@ class Notebook {
                 incoming.add(r);
                 continue;
               }
+              if (decoded['type'] == _syncSourceKind) {
+                incoming.add(r);
+                continue;
+              }
               final plain = Note.fromJson(decoded);
               if (plain.id != r.noteId || plain.vaultId != id) {
                 throw FormatException(
@@ -2315,9 +2509,31 @@ class Notebook {
       );
     }
     return _operation(
-      () => _forceFlushPending(vaultId: vaultId),
+      () => _journaled(
+        SyncOperation.kindFlush,
+        vaultId,
+        () => _forceFlushPending(vaultId: vaultId),
+      ),
       failureKey: 'force-flush-pending',
     );
+  }
+
+  /// Drains the durable batch plus the pending queue of [vault] with repeated
+  /// `_push` calls until the queue is actually empty, bounded so it never loops
+  /// forever on a server that keeps rejecting. Returns how many revisions are
+  /// still pending after the drain (0 = fully drained). Shared by
+  /// `_forceFlushPending` and the source-of-truth reset; each `_push` drains at
+  /// most one batch per pass.
+  Future<int> _drainPending(Vault vault) async {
+    for (var i = 0; i < 200; i++) {
+      final before = storage.pendingCount(vault.id);
+      final hadBatch = storage.batch(vault.id) != null;
+      if (before == 0 && !hadBatch) break;
+      await _push(vault);
+      final after = storage.pendingCount(vault.id);
+      if (after >= before && storage.batch(vault.id) == null) break;
+    }
+    return storage.pendingCount(vault.id);
   }
 
   Future<int> _forceFlushPending({String? vaultId}) async {
@@ -2369,18 +2585,7 @@ class Notebook {
           (x) => x.id == id,
           orElse: () => throw StateError('Unknown vault'),
         );
-        // A bounded number of passes: each `_push` drains at most one batch, so
-        // this flushes the durable batch plus the pending queue without ever
-        // looping forever on a server that keeps rejecting.
-        for (var i = 0; i < 200; i++) {
-          final before = storage.pendingCount(id);
-          final hadBatch = storage.batch(id) != null;
-          if (before == 0 && !hadBatch) break;
-          await _push(v);
-          final after = storage.pendingCount(id);
-          if (after >= before && storage.batch(id) == null) break;
-        }
-        remaining += storage.pendingCount(id);
+        remaining += await _drainPending(v);
       }
       return remaining;
     } finally {
@@ -2408,9 +2613,14 @@ class Notebook {
       );
     }
     return _operation(
-      () => _resetToLocalSourceOfTruth(
+      () => _journaled(
+        SyncOperation.kindReset,
         vaultId,
-        keepLosingCopies: keepLosingCopies,
+        () => _resetToLocalSourceOfTruth(
+          vaultId,
+          keepLosingCopies: keepLosingCopies,
+        ),
+        data: keepLosingCopies ? 'true' : 'false',
       ),
       failureKey: 'reset-source-of-truth',
     );
@@ -2948,7 +3158,12 @@ class Notebook {
   Future<void> _syncVault(Vault v) async {
     await serialized(() => _finishHiddenRemoteMoves(v));
     await serialized(() => _migrateHidden(v));
-    await _push(v);
+    // A held vault does not push: an automatic upload would create fresh
+    // divergence against the source-of-truth it has not yet adopted.
+    final heldBefore = storage.syncStatus(v.id)?.held ?? false;
+    if (!heldBefore) {
+      await _push(v);
+    }
     var more = true;
     while (more) {
       final page = await api!.request(
@@ -2982,6 +3197,11 @@ class Notebook {
             incoming.add(r);
             continue;
           }
+          if (decoded['type'] == _syncSourceKind) {
+            _observeSyncSourceMarker(v.id, decoded);
+            incoming.add(r);
+            continue;
+          }
           final plain = Note.fromJson(decoded);
           if (plain.id != r.noteId || plain.vaultId != v.id) {
             throw FormatException(
@@ -3002,25 +3222,64 @@ class Notebook {
       });
       more = page['hasMore'] as bool;
     }
+    // A pull that recorded a newer marker holds the vault: revisions are stored
+    // and the cursor advanced, but reconcile, image caching and the final push
+    // are all skipped so no document, folder or metadata row changes.
+    if (storage.syncStatus(v.id)?.held ?? false) return;
     await serialized(() => _reconcile(v));
     await _cacheImages(v);
     await _push(v);
   }
 
+  /// Records a source-of-truth marker observation. A marker with an epoch newer
+  /// than the highest already applied places the vault into the hold: the status
+  /// records the waiting-for-decision marker, and the caller skips reconcile and
+  /// pushes. The hold persists across restarts via the sync_state row.
+  void _observeSyncSourceMarker(String vaultId, Json decoded) {
+    final epoch = decoded['epoch'] as int? ?? 0;
+    final previous = storage.syncStatus(vaultId);
+    final applied = previous?.sourceEpochApplied ?? 0;
+    if (epoch <= applied) return;
+    storage.putSyncStatus(
+      vaultId,
+      VaultSyncStatus(
+        lastSuccessAt: previous?.lastSuccessAt,
+        lastAttemptAt: previous?.lastAttemptAt,
+        lastError: previous?.lastError,
+        lastErrorAt: previous?.lastErrorAt,
+        sourceEpochApplied: applied,
+        sourceHoldEpoch: epoch,
+        sourceHoldDevice:
+            (decoded['deviceName'] as String?) ??
+            (decoded['deviceId'] as String?),
+        sourceHoldAt: decoded['at'] as String?,
+      ),
+    );
+    _notifySyncStatus();
+  }
+
   /// Records a completed (successful) pass for [vaultId], clearing any prior
-  /// error so [VaultSyncStatus.failing] becomes false.
+  /// error so [VaultSyncStatus.failing] becomes false. Hold fields survive so a
+  /// vault still waiting for an ownership decision stays held across a pass.
   void _recordSyncSuccess(String vaultId, DateTime attemptedAt) {
+    final previous = storage.syncStatus(vaultId);
     storage.putSyncStatus(
       vaultId,
       VaultSyncStatus(
         lastSuccessAt: attemptedAt,
         lastAttemptAt: attemptedAt,
+        sourceEpochApplied: previous?.sourceEpochApplied ?? 0,
+        sourceHoldEpoch: previous?.sourceHoldEpoch,
+        sourceHoldDevice: previous?.sourceHoldDevice,
+        sourceHoldAt: previous?.sourceHoldAt,
       ),
     );
+    _notifySyncStatus();
   }
 
   /// Records a failed pass for [vaultId], preserving the last success so the
   /// status keeps both sides of "has it ever synced, and is it failing now".
+  /// Hold fields survive as well, for the same reason.
   void _recordSyncFailure(
     String vaultId,
     DateTime attemptedAt,
@@ -3034,8 +3293,13 @@ class Notebook {
         lastAttemptAt: attemptedAt,
         lastError: '$error',
         lastErrorAt: attemptedAt,
+        sourceEpochApplied: previous?.sourceEpochApplied ?? 0,
+        sourceHoldEpoch: previous?.sourceHoldEpoch,
+        sourceHoldDevice: previous?.sourceHoldDevice,
+        sourceHoldAt: previous?.sourceHoldAt,
       ),
     );
+    _notifySyncStatus();
   }
 
   Future<void> _push(Vault vault) async {
@@ -3149,7 +3413,8 @@ class Notebook {
     final images = imageReferencePattern
         .allMatches(
           outer['type'] == _HiddenSync.kind ||
-                  outer['type'] == _HiddenSync.configKind
+                  outer['type'] == _HiddenSync.configKind ||
+                  outer['type'] == _syncSourceKind
               ? ''
               : Note.fromJson(outer).body,
         )
@@ -3320,15 +3585,17 @@ class Notebook {
 
   Future<void> _reconcile(Vault vault) async {
     final all = storage.revisions(vault.id);
+    final sourceId = await _syncSourceId(vault.id);
     for (final noteId in all.map((r) => r.noteId).toSet()) {
       final first = all.firstWhere((r) => r.noteId == noteId);
       final type = (await _hiddenOuter(first))['type'];
       if (type == _HiddenSync.configKind) continue;
+      if (type == _syncSourceKind) continue; // internal marker never materialises.
       if (type == _HiddenSync.kind) {
         await _projectHidden(vault, noteId);
         continue;
       }
-      if (_hiddenIdentity(vault.id, noteId)) {
+      if (_internalIdentity(vault.id, noteId, sourceId: sourceId)) {
         await _eraseNote(vault.id, noteId);
         continue;
       }
@@ -3461,6 +3728,99 @@ class Notebook {
   bool _hiddenIdentity(String vaultId, String noteId) =>
       storage.documents(_hiddenVault(vaultId)).containsKey(noteId) ||
       storage.documents(_hiddenRetiredVault(vaultId)).containsKey(noteId);
+
+  // ---- Source-of-truth marker ---------------------------------------------
+  /// The marker envelope kind, distinct from the hidden-note and hidden-config
+  /// kinds. The server transports it as an ordinary opaque revision under an
+  /// internal note id that never surfaces as a user note.
+  static const _syncSourceKind = 'silique:2:sync-source';
+
+  /// Cache of the deterministic marker note id per unlocked vault.
+  final _syncSourceIds = <String, String>{};
+
+  /// The deterministic internal note id under which the source-of-truth marker
+  /// lives. Derived from the vault key, so every device derives the same id and
+  /// a reset on one device is observed by all.
+  Future<String> _syncSourceId(String vaultId) async {
+    final cached = _syncSourceIds[vaultId];
+    if (cached != null) return cached;
+    final id = await crypto.stableId(unlocked[vaultId]!, 'sync-source:$vaultId');
+    _syncSourceIds[vaultId] = id;
+    return id;
+  }
+
+  /// A single predicate for internal identities that must never leak into the
+  /// user-visible note map or any consumer of it (search, export, widgets): the
+  /// hidden-note identities and the source-of-truth marker id. [sourceId] is the
+  /// already-resolved marker id when the caller has it, so the synchronous form
+  /// can also cover the marker without an await.
+  bool _internalIdentity(
+    String vaultId,
+    String noteId, {
+    String? sourceId,
+  }) =>
+      _hiddenIdentity(vaultId, noteId) ||
+      noteId == sourceId ||
+      noteId == _syncSourceIds[vaultId];
+
+  /// Decodes a source-of-truth marker revision's epoch, or 0 for malformed or
+  /// non-marker payloads.
+  Future<int> _syncSourceEpoch(Revision r) async {
+    try {
+      final outer = await _hiddenOuter(r);
+      if (outer['type'] == _syncSourceKind) return outer['epoch'] as int? ?? 0;
+    } catch (_) {
+      // A corrupt envelope is not a marker; treat its epoch as unknown (0).
+    }
+    return 0;
+  }
+
+  /// The highest source-of-truth epoch this device has seen among the marker
+  /// revisions currently stored for [vaultId].
+  Future<int> _maxKnownEpoch(String vaultId, String sourceId) async {
+    var max = 0;
+    for (final r in storage.revisions(vaultId, noteId: sourceId)) {
+      final epoch = await _syncSourceEpoch(r);
+      if (epoch > max) max = epoch;
+    }
+    return max;
+  }
+
+  /// Builds a source-of-truth marker revision under the deterministic marker id
+  /// with the given [epoch] and [parents]. Written last by a reset so a marker
+  /// is ordered after the content it describes.
+  Future<Revision> _makeSyncSourceMarker(
+    Vault vault,
+    int epoch,
+    List<String> parents,
+  ) async {
+    final sourceId = await _syncSourceId(vault.id);
+    final placeholder = Revision(
+      id: _uuid.v4(),
+      vaultId: vault.id,
+      noteId: sourceId,
+      parents: parents,
+      payload: '',
+    );
+    final payload = await crypto.seal(
+      unlocked[vault.id]!,
+      jsonEncode({
+        'type': _syncSourceKind,
+        'epoch': epoch,
+        'deviceId': deviceId,
+        'deviceName': await deviceName(),
+        'at': DateTime.now().toUtc().toIso8601String(),
+      }),
+      placeholder.aad,
+    );
+    return Revision(
+      id: placeholder.id,
+      vaultId: vault.id,
+      noteId: sourceId,
+      parents: parents,
+      payload: payload,
+    );
+  }
 
   // An encrypted recovery copy is also a durable move intent. A crash or lost
   // DELETE acknowledgement retries the idempotent purge, never the old upload.

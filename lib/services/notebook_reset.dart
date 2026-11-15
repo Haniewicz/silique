@@ -1,6 +1,6 @@
 part of 'notebook.dart';
 
-enum _NoteSyncType { ordinary, hidden, hiddenConfig }
+enum _NoteSyncType { ordinary, hidden, hiddenConfig, syncSource }
 
 /// The source-of-truth reset: retires every ordinary note's heads behind a
 /// single new revision whose content is this device's local document, so the
@@ -17,11 +17,6 @@ extension NotebookReset on Notebook {
   /// previous link, so a chain never exceeds the server limit.
   static const _maxParents = 32;
 
-  /// Bounded number of push passes, mirroring `_forceFlushPending`. A reset can
-  /// produce more than one batch (chain links + copies), but must never loop
-  /// forever on a server that keeps rejecting.
-  static const _maxPushPasses = 200;
-
   Future<VaultResetReport> _resetToLocalSourceOfTruth(
     String vaultId, {
     required bool keepLosingCopies,
@@ -33,6 +28,7 @@ extension NotebookReset on Notebook {
         copiesKept: 0,
         headsMerged: 0,
         remainingDiverged: 0,
+        remainingPending: 0,
         hiddenSkipped: 0,
       );
     }
@@ -102,18 +98,26 @@ extension NotebookReset on Notebook {
         () => _buildAndWriteReset(vault, keepLosingCopies: keepLosingCopies),
       );
 
-      // 4. Push the reset revisions through the normal image-filtering path.
-      for (var i = 0; i < _maxPushPasses; i++) {
-        final before = storage.pendingCount(vaultId);
-        final hadBatch = storage.batch(vaultId) != null;
-        if (before == 0 && !hadBatch) break;
-        await _push(vault);
-        final after = storage.pendingCount(vaultId);
-        if (after >= before && storage.batch(vaultId) == null) break;
-      }
+      // 4. Push the reset revisions through the normal image-filtering path,
+      // draining the queue until it is actually empty (bounded), then one more
+      // full pull. The pull can surface fresh heads, so drain a second time
+      // to keep the "zero pending" invariant honest.
+      await _drainPending(vault);
 
-      // 5. Final full pull + reconcile, then report the remaining divergence.
+      // 5. Final full pull + reconcile, so the marker's current heads (pulled
+      // back from the server) are known before the marker is written.
       await _resetFullPull(client, vault, reconcile: true);
+
+      // 5b. Marker, as the LAST content step: epoch = maxKnownEpoch + 1 and
+      // parents = the marker's current heads. This orders the reset after the
+      // content it describes, and writing it also unbinds any stale hold the
+      // previous marker placed on this (now source-of-truth) device.
+      await serialized(() => _writeSyncSourceMarker(vault));
+
+      // 6. The reset only counts as done when BOTH invariants hold: no diverged
+      // notes and no pending revisions. The final pull and the marker can
+      // re-queue revisions, so drain once more after it.
+      final remainingPending = await _drainPending(vault);
       final remaining = await serialized(() => _ordinaryDivergedCount(vaultId));
 
       return VaultResetReport(
@@ -122,6 +126,7 @@ extension NotebookReset on Notebook {
         copiesKept: report.copiesKept,
         headsMerged: report.headsMerged,
         remainingDiverged: remaining,
+        remainingPending: remainingPending,
         hiddenSkipped: report.hiddenSkipped,
       );
     } finally {
@@ -168,6 +173,10 @@ extension NotebookReset on Notebook {
           }
           if (decoded['type'] == _HiddenSync.kind) {
             await _acceptHidden(r, decoded);
+            incoming.add(r);
+            continue;
+          }
+          if (decoded['type'] == Notebook._syncSourceKind) {
             incoming.add(r);
             continue;
           }
@@ -228,6 +237,7 @@ extension NotebookReset on Notebook {
     for (final noteId in noteIds) {
       final type = await _noteSyncType(vault, noteId);
       if (type == _NoteSyncType.hiddenConfig) continue;
+      if (type == _NoteSyncType.syncSource) continue;
       if (type == _NoteSyncType.hidden) {
         hiddenSkipped++;
         continue;
@@ -345,6 +355,205 @@ extension NotebookReset on Notebook {
     return Note.fromJson(json as Json);
   }
 
+  /// Writes the source-of-truth marker as the last reset step: one revision
+  /// under the deterministic marker id, with `epoch = maxKnownEpoch + 1` and
+  /// parents = the marker's current heads. Also unbinds any stale hold this
+  /// device held: the device is now the source of truth, so its applied epoch
+  /// advances to the marker it just wrote and the hold is cleared.
+  Future<void> _writeSyncSourceMarker(Vault vault) async {
+    final sourceId = await _syncSourceId(vault.id);
+    final epoch = (await _maxKnownEpoch(vault.id, sourceId)) + 1;
+    final parents = heads(vault.id, sourceId).map((r) => r.id).toList();
+    final marker = await _makeSyncSourceMarker(vault, epoch, parents);
+    storage.putRevision(marker, pending: true);
+    final previous = storage.syncStatus(vault.id);
+    storage.putSyncStatus(
+      vault.id,
+      VaultSyncStatus(
+        lastSuccessAt: previous?.lastSuccessAt,
+        lastAttemptAt: previous?.lastAttemptAt,
+        lastError: previous?.lastError,
+        lastErrorAt: previous?.lastErrorAt,
+        sourceEpochApplied: epoch,
+      ),
+    );
+    _notifySyncStatus();
+  }
+
+  /// Computes the pending revision ids the server head actually supersedes,
+  /// using the same filter as the reset's acknowledge: only ordinary notes that
+  /// have at least one server-known head are superseded; local-only ordinary
+  /// notes (no server head) and hidden/hidden-config revisions stay pending.
+  Future<List<String>> _supersededPendingIds(Vault vault) async {
+    final all = storage.revisions(vault.id);
+    final noteIdById = {for (final r in all) r.id: r.noteId};
+    final pendingIds = storage.pendingIds(vault.id);
+    final superseded = <String>{};
+    for (final noteId in all.map((r) => r.noteId).toSet()) {
+      if (await _noteSyncType(vault, noteId) != _NoteSyncType.ordinary) {
+        continue;
+      }
+      if (_serverHeads(vault, noteId).isEmpty) continue;
+      for (final id in pendingIds.where((id) => noteIdById[id] == noteId)) {
+        superseded.add(id);
+      }
+    }
+    return superseded.toList();
+  }
+
+  /// Adopts the source of truth named by the current hold: optionally exports a
+  /// backup first, then acknowledges only the ordinary pending revisions the
+  /// server head supersedes (local-only notes and hidden revisions stay
+  /// pending), advances `sourceEpochApplied` to the hold epoch, clears the hold,
+  /// and runs reconcile + cache + drain so the vault converges. Idempotent: a
+  /// vault that is not held (or already adopted) performs no work.
+  Future<void> adoptSourceOfTruth(String vaultId, {required bool backupFirst}) {
+    if (_syncing) {
+      return Future.error(
+        StateError(
+          tr(
+            'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+            'A sync is in progress — wait for it to finish.',
+          ),
+        ),
+      );
+    }
+    return _operation(
+      () => _journaled(
+        SyncOperation.kindAdopt,
+        vaultId,
+        () => _adoptSourceOfTruth(vaultId, backupFirst: backupFirst),
+        data: backupFirst ? 'true' : 'false',
+      ),
+      failureKey: 'adopt-source-of-truth',
+    );
+  }
+
+  Future<void> _adoptSourceOfTruth(
+    String vaultId, {
+    required bool backupFirst,
+  }) async {
+    if (_updatePrepared && !_insideOperation) return;
+    _requireLiveVault(vaultId);
+    final vault = vaults.firstWhere(
+      (v) => v.id == vaultId,
+      orElse: () => throw StateError(
+        tr('Nieznany vault.', 'Unknown vault.'),
+      ),
+    );
+    if (!unlocked.containsKey(vaultId)) {
+      throw StateError(tr('Najpierw odblokuj vault.', 'Unlock the vault first.'));
+    }
+    if (!vault.syncEnabled) {
+      throw StateError(
+        tr(
+          'Włącz synchronizację, aby pobrać źródło prawdy.',
+          'Enable synchronization to adopt the source of truth.',
+        ),
+      );
+    }
+    if (!_ownerIsCurrent(vault.owner)) {
+      throw StateError(
+        tr(
+          'Połącz konto właściciela vaulta.',
+          'Connect the vault owner\'s account.',
+        ),
+      );
+    }
+    if (vaultDeletionPending(vaultId) || storage.isVaultDeleted(vaultId)) {
+      throw StateError(
+        tr(
+          'Vault usunięto lub oczekuje na dokończenie usuwania.',
+          'The vault has been deleted or is awaiting deletion.',
+        ),
+      );
+    }
+    if (_syncing || _hiddenMoving) {
+      throw StateError(
+        tr(
+          'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+          'A sync is in progress — wait for it to finish.',
+        ),
+      );
+    }
+    final client = api;
+    if (client == null) {
+      throw StateError(
+        tr(
+          'Brak połączenia z serwerem. Zaloguj się, aby kontynuować.',
+          'Not connected to a server. Sign in to continue.',
+        ),
+      );
+    }
+    final status = storage.syncStatus(vaultId);
+    final holdEpoch = status?.sourceHoldEpoch;
+    if (holdEpoch == null || holdEpoch <= (status?.sourceEpochApplied ?? 0)) {
+      // Idempotent no-op: nothing to adopt, or already adopted.
+      return;
+    }
+
+    _syncing = true;
+    try {
+      // 1. Optional backup: run the existing vault export (desktop directory,
+      // mobile ZIP + share) before any adoption mutates local state.
+      if (backupFirst) {
+        await _backupBeforeAdopt(vault);
+      }
+
+      // 2. Full pull (no reconcile) so the server head set is authoritative.
+      await _resetFullPull(client, vault, reconcile: false);
+
+      // 3. Acknowledge only the ordinary pending revisions the server head
+      // supersedes. Local-only notes and hidden revisions stay pending.
+      final superseded = await serialized(() => _supersededPendingIds(vault));
+      storage.acknowledge(vaultId, superseded);
+
+      // 4. Advance the applied epoch, clear the hold.
+      final previous = storage.syncStatus(vaultId);
+      storage.putSyncStatus(
+        vaultId,
+        VaultSyncStatus(
+          lastSuccessAt: previous?.lastSuccessAt,
+          lastAttemptAt: previous?.lastAttemptAt,
+          lastError: previous?.lastError,
+          lastErrorAt: previous?.lastErrorAt,
+          sourceEpochApplied: holdEpoch,
+        ),
+      );
+      _notifySyncStatus();
+
+      // 5. Reconcile + cache + drain so the server's content becomes local and
+      // the vault converges to zero divergence.
+      await serialized(() => _reconcile(vault));
+      await _cacheImages(vault);
+      await _drainPending(vault);
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  /// Runs the existing vault export before adoption. Desktop writes to the
+  /// documents directory; mobile builds a ZIP and shares it. Uses the same
+  /// prepare-plan path as the export dialog without re-implementing crypto.
+  Future<void> _backupBeforeAdopt(Vault vault) async {
+    final data = await prepareVaultExport(vault.id);
+    final plan = buildVaultExportPlan(
+      data.notes,
+      images: data.images,
+      folders: data.folders,
+    );
+    if (Platform.isAndroid || Platform.isIOS) {
+      await shareExportZip(
+        bytes: buildVaultExportZip(plan),
+        name: safeVaultZipName(vault.name),
+      );
+    } else {
+      final dir = await getApplicationDocumentsDirectory();
+      final writer = ExportVaultWriter(dir);
+      await writer.write(plan);
+    }
+  }
+
   /// Builds the retire chain for [note]: a single revision when there are at
   /// most 32 heads, otherwise a sequence where each link cites up to 31
   /// remaining heads plus the previous link. Every link carries [chosen]'s
@@ -436,8 +645,11 @@ extension NotebookReset on Notebook {
       final outer = await _hiddenOuter(revisions.first);
       if (outer['type'] == _HiddenSync.configKind) return _NoteSyncType.hiddenConfig;
       if (outer['type'] == _HiddenSync.kind) return _NoteSyncType.hidden;
+      if (outer['type'] == Notebook._syncSourceKind) {
+        return _NoteSyncType.syncSource;
+      }
     }
-    if (_hiddenIdentity(vault.id, noteId)) return _NoteSyncType.hidden;
+    if (_internalIdentity(vault.id, noteId)) return _NoteSyncType.hidden;
     return _NoteSyncType.ordinary;
   }
 
