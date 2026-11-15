@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:http/http.dart' as http;
@@ -457,6 +458,367 @@ void main() {
       expect(issue.single.reason, SyncIssue.tombstoned);
       expect(repo.storage.isVaultDeleted(vaultId), isFalse);
       expect(repo.storage.documents(vaultId), isNotEmpty);
+    },
+  );
+
+  test(
+    'switching an image-bearing vault to a fresh server re-uploads the image '
+    'before the batch and finishes sync',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('silique-switch-7-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      final note = await repo.createNote(vault.id);
+      final reference = await repo.addImage(
+        vault.id,
+        note.id,
+        Uint8List.fromList(List<int>.generate(64, (i) => i)),
+        'image/png',
+      );
+      final imageId = reference.split(':').last;
+      await repo.save(note.copyWith(body: '![photo]($reference)'));
+
+      // Simulate "already uploaded to the old server": the image asset is acked.
+      repo.storage.markImageUploaded(vault.id, imageId);
+      expect(repo.storage.pendingImages(vault.id), isEmpty);
+      expect(repo.storage.imageAsset(vault.id, imageId)!['uploaded'], 1);
+
+      // Acknowledged revisions: only the server switch must force re-upload.
+      repo.storage.atomic(
+        () => repo.storage.acknowledge(
+          vault.id,
+          repo.storage.revisions(vault.id).map((r) => r.id).toList(),
+        ),
+      );
+      expect(repo.storage.pending(vault.id), isEmpty);
+
+      vault.owner = 'https://inny.serwer|inny-user';
+      vault.syncEnabled = true;
+      repo.storage.putVault(vault);
+
+      final requests = <String>[];
+      final uploadedChunks = <String>[];
+      final uploadedManifests = <String>[];
+      final acceptedBatches = <String>[];
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: MockClient((request) async {
+          requests.add('${request.method} ${request.url.path}');
+          final path = request.url.path;
+          if (path == '/.well-known/silique') {
+            return http.Response(
+              jsonEncode({
+                'api_version': '1',
+                'features': {'image_attachments': true},
+              }),
+              200,
+            );
+          }
+          if (path == '/v1/vaults') {
+            return http.Response(
+              jsonEncode({'vaults': <Object>[], 'deletedVaults': <Object>[]}),
+              200,
+            );
+          }
+          if (request.method == 'PUT' && path == '/v1/vaults/${vault.id}') {
+            return http.Response(jsonEncode({'version': 1}), 200);
+          }
+          if (RegExp(r'/images/[a-f0-9-]{36}/chunks/\d+$')
+              .hasMatch(path)) {
+            uploadedChunks.add(path);
+            return http.Response('{}', 200);
+          }
+          if (RegExp(r'/images/[a-f0-9-]{36}$').hasMatch(path) &&
+              request.method == 'PUT') {
+            uploadedManifests.add(path);
+            return http.Response('{}', 200);
+          }
+          if (request.method == 'POST' && path.endsWith('/batches')) {
+            if (uploadedManifests.isEmpty) {
+              return http.Response(
+                jsonEncode({'error': 'Image not uploaded yet'}),
+                409,
+              );
+            }
+            final body = jsonDecode(request.body) as Json;
+            final ids = (body['revisions'] as List)
+                .map((r) => (r as Json)['id'] as String)
+                .toList();
+            acceptedBatches.addAll(ids);
+            return http.Response(
+              jsonEncode({'batchId': body['batchId'], 'accepted': ids}),
+              200,
+            );
+          }
+          if (path.endsWith('/changes')) {
+            return http.Response(jsonEncode(_emptyChanges()), 200);
+          }
+          return http.Response('{}', 200);
+        }),
+      );
+
+      await repo.sync();
+
+      // The image was uploaded (chunks + manifest) before the batch was accepted.
+      expect(uploadedChunks, isNotEmpty);
+      expect(uploadedManifests, isNotEmpty);
+      expect(acceptedBatches, isNotEmpty);
+      expect(repo.syncIssues, isEmpty);
+      // After a successful sync the image asset is acked again locally.
+      expect(repo.storage.imageAsset(vault.id, imageId)!['uploaded'], 1);
+    },
+  );
+
+  test(
+    'a 409 "Image not uploaded yet" self-heals by re-uploading the image and '
+    'retrying the batch once',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('silique-switch-8-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      final note = await repo.createNote(vault.id);
+      final reference = await repo.addImage(
+        vault.id,
+        note.id,
+        Uint8List.fromList(List<int>.generate(64, (i) => i)),
+        'image/png',
+      );
+      final imageId = reference.split(':').last;
+      await repo.save(note.copyWith(body: '![photo]($reference)'));
+      // The client THINKS the image is uploaded (acked), but the server lost it.
+      repo.storage.markImageUploaded(vault.id, imageId);
+
+      // The vault is already owned by this account on this server, so sync does
+      // NOT rebind (which would re-mark images pending); it pushes directly.
+      // The revision is pending, but the image is acked.
+      vault.owner = 'current-user';
+      vault.syncEnabled = true;
+      repo.storage.putVault(vault);
+
+      final requests = <String>[];
+      var batchCount = 0;
+      var manifestsSeen = 0;
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: MockClient((request) async {
+          requests.add('${request.method} ${request.url.path}');
+          final path = request.url.path;
+          if (path == '/.well-known/silique') {
+            return http.Response(
+              jsonEncode({
+                'api_version': '1',
+                'features': {'image_attachments': true},
+              }),
+              200,
+            );
+          }
+          if (path == '/v1/vaults') {
+            return http.Response(
+              jsonEncode({'vaults': <Object>[], 'deletedVaults': <Object>[]}),
+              200,
+            );
+          }
+          if (RegExp(r'/images/[a-f0-9-]{36}$').hasMatch(path) &&
+              request.method == 'PUT') {
+            manifestsSeen++;
+            return http.Response('{}', 200);
+          }
+          if (RegExp(r'/images/[a-f0-9-]{36}/chunks/\d+$').hasMatch(path)) {
+            return http.Response('{}', 200);
+          }
+          if (request.method == 'POST' && path.endsWith('/batches')) {
+            batchCount++;
+            // First batch is rejected before the manifest exists on the server,
+            // even though the client believes the image was already uploaded.
+            if (manifestsSeen == 0) {
+              return http.Response(
+                jsonEncode({'error': 'Image not uploaded yet'}),
+                409,
+              );
+            }
+            final body = jsonDecode(request.body) as Json;
+            final ids = (body['revisions'] as List)
+                .map((r) => (r as Json)['id'] as String)
+                .toList();
+            return http.Response(
+              jsonEncode({'batchId': body['batchId'], 'accepted': ids}),
+              200,
+            );
+          }
+          if (path.endsWith('/changes')) {
+            return http.Response(jsonEncode(_emptyChanges()), 200);
+          }
+          return http.Response('{}', 200);
+        }),
+      );
+
+      await expectLater(repo.sync(), completes);
+      expect(batchCount, 2);
+      expect(manifestsSeen, 1);
+      expect(repo.storage.imageAsset(vault.id, imageId)!['uploaded'], 1);
+    },
+  );
+
+  test(
+    'recovery from "Parent revision missing" also re-uploads the image',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('silique-switch-9-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Osobiste');
+      final vault = repo.vaults.single;
+      final note = await repo.createNote(vault.id);
+      final reference = await repo.addImage(
+        vault.id,
+        note.id,
+        Uint8List.fromList(List<int>.generate(64, (i) => i)),
+        'image/png',
+      );
+      final imageId = reference.split(':').last;
+      await repo.save(note.copyWith(body: 'two'));
+      // Image is believed uploaded; the revision was acked on the old server.
+      repo.storage.markImageUploaded(vault.id, imageId);
+      repo.storage.atomic(
+        () => repo.storage.acknowledge(
+          vault.id,
+          repo.storage.revisions(vault.id).map((r) => r.id).toList(),
+        ),
+      );
+      expect(repo.storage.pending(vault.id), isEmpty);
+
+      // Fresh server: rebind marks everything pending. Then the first batch
+      // references a parent the server has never seen.
+      vault.owner = 'https://inny.serwer|inny-user';
+      vault.syncEnabled = true;
+      repo.storage.putVault(vault);
+
+      final uploadedManifests = <String>[];
+      var batchCount = 0;
+      repo.api = SiliqueApi(
+        _server,
+        token: 'test',
+        client: MockClient((request) async {
+          final path = request.url.path;
+          if (path == '/.well-known/silique') {
+            return http.Response(
+              jsonEncode({
+                'api_version': '1',
+                'features': {'image_attachments': true},
+              }),
+              200,
+            );
+          }
+          if (path == '/v1/vaults') {
+            return http.Response(
+              jsonEncode({'vaults': <Object>[], 'deletedVaults': <Object>[]}),
+              200,
+            );
+          }
+          if (request.method == 'PUT' && path == '/v1/vaults/${vault.id}') {
+            return http.Response(jsonEncode({'version': 1}), 200);
+          }
+          if (RegExp(r'/images/[a-f0-9-]{36}$').hasMatch(path) &&
+              request.method == 'PUT') {
+            uploadedManifests.add(path);
+            return http.Response('{}', 200);
+          }
+          if (RegExp(r'/images/[a-f0-9-]{36}/chunks/\d+$').hasMatch(path)) {
+            return http.Response('{}', 200);
+          }
+          if (request.method == 'POST' && path.endsWith('/batches')) {
+            batchCount++;
+            if (batchCount == 1) {
+              return http.Response(
+                jsonEncode({'error': 'Parent revision missing'}),
+                409,
+              );
+            }
+            final body = jsonDecode(request.body) as Json;
+            final ids = (body['revisions'] as List)
+                .map((r) => (r as Json)['id'] as String)
+                .toList();
+            return http.Response(
+              jsonEncode({'batchId': body['batchId'], 'accepted': ids}),
+              200,
+            );
+          }
+          if (path.endsWith('/changes')) {
+            return http.Response(jsonEncode(_emptyChanges()), 200);
+          }
+          return http.Response('{}', 200);
+        }),
+      );
+
+      await repo.sync();
+
+      // The image was re-uploaded as part of the recovery path.
+      expect(uploadedManifests, isNotEmpty);
+      expect(repo.syncIssues, isEmpty);
+      expect(repo.storage.imageAsset(vault.id, imageId)!['uploaded'], 1);
+    },
+  );
+
+  test(
+    'markAllImagesPending zeroes uploaded for the target vault only',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('silique-switch-10-');
+      final repo = await _repo(dir);
+      addTearDown(() async {
+        await repo.close();
+        dir.deleteSync(recursive: true);
+      });
+      await repo.createVault('Pierwszy');
+      await repo.createVault('Drugi');
+      final a = repo.vaults[0].id;
+      final b = repo.vaults[1].id;
+      final noteA = await repo.createNote(a);
+      final noteB = await repo.createNote(b);
+
+      const manifest = '{}';
+      final idA = '11111111-1111-1111-1111-111111111111';
+      final idB = '22222222-2222-2222-2222-222222222222';
+
+      // Mark both images uploaded, in two different vaults.
+      repo.storage.putImageAsset(
+        a,
+        noteA.id,
+        idA,
+        manifest,
+        uploaded: true,
+      );
+      repo.storage.putImageAsset(
+        b,
+        noteB.id,
+        idB,
+        manifest,
+        uploaded: true,
+      );
+      expect(repo.storage.imageAsset(a, idA)!['uploaded'], 1);
+      expect(repo.storage.imageAsset(b, idB)!['uploaded'], 1);
+
+      repo.storage.markAllImagesPending(a);
+
+      // Only vault A's image is now pending (uploaded=0).
+      expect(repo.storage.imageAsset(a, idA)!['uploaded'], 0);
+      expect(repo.storage.pendingImages(a), hasLength(1));
+      // Vault B is untouched.
+      expect(repo.storage.imageAsset(b, idB)!['uploaded'], 1);
+      expect(repo.storage.pendingImages(b), isEmpty);
     },
   );
 }

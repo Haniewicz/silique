@@ -2094,6 +2094,10 @@ class Notebook {
       // cursor belongs to a different server, so restart it at 0.
       storage.markAllPending(vault.id);
       storage.setCursor(vault.id, 0);
+      // The fresh server also has none of the locally acknowledged images, so
+      // re-mark them pending before the PUT: any interruption mid-flight makes
+      // the next pass re-upload the images too, not just the revision DAG.
+      storage.markAllImagesPending(vault.id);
     }
     final response = await api!.request(
       'PUT',
@@ -2728,10 +2732,43 @@ class Notebook {
         // A pending revision references a parent this server has never seen —
         // the vault was re-created on a fresh server. Re-mark every local
         // revision pending so the next batch re-uploads the whole DAG starting
-        // from its roots (insertion order is parent-before-child).
+        // from its roots (insertion order is parent-before-child). The fresh
+        // server also lacks the locally acknowledged images, so re-mark those
+        // pending as well.
         storage.atomic(() => storage.acknowledge(vault.id, const []));
         storage.markAllPending(vault.id);
+        storage.markAllImagesPending(vault.id);
         return;
+      }
+      if (error.message.contains('Image not uploaded yet')) {
+        // Some revision cites an image without a manifest on this server.
+        // Re-upload every image and retry the batch exactly once (bounded, no
+        // infinite loop). If it still fails, report a readable error instead of
+        // leaking the raw server message.
+        await _selfHealImagesThenRetryBatch(vault, batch);
+        return;
+      }
+      rethrow;
+    }
+  }
+
+  /// Re-uploads every image of [vault] and retries [batch] exactly once after
+  /// a `409 "Image not uploaded yet"`. Bounded: on a second identical failure
+  /// it throws a readable error instead of looping or leaking the raw server
+  /// message. Images and notes stay safe locally.
+  Future<void> _selfHealImagesThenRetryBatch(Vault vault, Json batch) async {
+    storage.markAllImagesPending(vault.id);
+    await _uploadImages(vault);
+    try {
+      await _sendBatch(vault, batch);
+    } on ApiException catch (error) {
+      if (error.status == 409 && error.message.contains('Image not uploaded yet')) {
+        throw StateError(
+          tr(
+            'Nie udało się uzupełnić zdjęć na serwerze. Twoje notatki są bezpieczne lokalnie i synchronizacja zostanie ponowiona.',
+            'The images could not be completed on the server. Your notes are safe locally and sync will be retried.',
+          ),
+        );
       }
       rethrow;
     }

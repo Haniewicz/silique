@@ -288,12 +288,21 @@ extension NotebookImages on Notebook {
       );
       var purged = false;
       for (var i = 0; i < (manifest['chunks'] as int); i++) {
+        final chunk = storage.imageChunk(vault.id, id, i);
+        if (chunk == null) {
+          throw StateError(
+            tr(
+              'Brak lokalnego fragmentu zdjęcia (obrazek $id, notatka ${asset['note_id']}).',
+              'Missing local image chunk (image $id, note ${asset['note_id']}).',
+            ),
+          );
+        }
         final response = await api!.request(
           'PUT',
           '/v1/vaults/${vault.id}/images/$id/chunks/$i',
           body: {
             'noteId': asset['note_id'],
-            'payload': storage.imageChunk(vault.id, id, i)!,
+            'payload': chunk,
           },
         );
         if (response['purged'] == true) {
