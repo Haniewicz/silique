@@ -10,6 +10,23 @@ work="$RUNNER_TEMP/silique-linux-builder"
 [[ ! -e "$work" ]]
 mkdir -p "$work"
 stage() { printf '%s\n' "$1" > "$work/stage"; }
+
+# Optional warm cache (restored by the workflow's actions/cache step). The work
+# directory stays fresh on purpose: the cache only seeds the two inputs that are
+# expensive to rebuild and reproducible from their markers — the patched GTK4
+# engine SDK and the Fedora 44 rootfs. Empty/unset means a fully cold build.
+cache="${SILIQUE_LINUX_CACHE:-}"
+cache_key="${SILIQUE_CACHE_KEY:-}"
+engine_marker='.silique-engine-cache-key'
+rootfs_marker='.silique-fedora-cache-key'
+if [[ -n "$cache" ]]; then
+  [[ "$cache" == /* ]] || { echo 'SILIQUE_LINUX_CACHE must be an absolute path.' >&2; exit 1; }
+  mkdir -p "$cache"
+fi
+cache_dirty=0 # set when this run had to build something the cache should keep
+cache_matches() { # <marker file> -> true when it names the current cache key
+  [[ -n "$cache_key" && -f "$1" && "$(head -n 1 "$1")" == "$cache_key" ]]
+}
 stage dependencies
 export TMPDIR="$work/tmp"
 mkdir -m 700 "$TMPDIR"
@@ -30,15 +47,27 @@ cd "$app_root"
 stage pointer-regression
 python3 tool/test_gtk4_pointer_position.py --report "$work/pointer-position.json"
 
-git init "$work/depot_tools"
-git -C "$work/depot_tools" remote add origin https://chromium.googlesource.com/chromium/tools/depot_tools.git
-git -C "$work/depot_tools" fetch --depth 1 origin 1eb46f8b23b4c6b3caa2be8e05999b6d1f4d0253
-git -C "$work/depot_tools" checkout --detach FETCH_HEAD
-export SILIQUE_DEPOT_TOOLS="$work/depot_tools"
-export SILIQUE_GTK4_SDK="$work/flutter-gtk4"
-export DEPOT_TOOLS_UPDATE=0
 stage engine-bootstrap
-bash tool/bootstrap_linux_gtk4.sh
+export SILIQUE_GTK4_SDK="$work/flutter-gtk4"
+if [[ -n "$cache" && -x "$cache/flutter-gtk4/bin/flutter" &&
+      -f "$cache/flutter-gtk4/$engine_marker" ]] &&
+    cache_matches "$cache/flutter-gtk4/$engine_marker"; then
+  echo 'Restoring the patched GTK4 engine SDK from cache.'
+  cp -a "$cache/flutter-gtk4" "$SILIQUE_GTK4_SDK"
+else
+  echo 'Building the patched GTK4 engine SDK (cold path).'
+  cache_dirty=1
+  # depot_tools is only needed while bootstrapping the engine, so the warm path
+  # does not pay for its fetch.
+  git init "$work/depot_tools"
+  git -C "$work/depot_tools" remote add origin https://chromium.googlesource.com/chromium/tools/depot_tools.git
+  git -C "$work/depot_tools" fetch --depth 1 origin 1eb46f8b23b4c6b3caa2be8e05999b6d1f4d0253
+  git -C "$work/depot_tools" checkout --detach FETCH_HEAD
+  export SILIQUE_DEPOT_TOOLS="$work/depot_tools"
+  export DEPOT_TOOLS_UPDATE=0
+  bash tool/bootstrap_linux_gtk4.sh
+  [[ -z "$cache_key" ]] || printf '%s\n' "$cache_key" > "$SILIQUE_GTK4_SDK/$engine_marker"
+fi
 
 # Fedora's own RPM tooling resolves Fedora ABI requirements, not Ubuntu names.
 stage fedora-rootfs
@@ -53,10 +82,23 @@ skopeo inspect "$image" > "$work/fedora-image.json"
 digest="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["Digest"])' "$work/fedora-image.json")"
 [[ "$digest" =~ ^sha256:[0-9a-f]{64}$ ]]
 fedora_image="registry.fedoraproject.org/fedora@$digest"
-image="docker://$fedora_image"
-skopeo copy "$image" "oci:$work/fedora-oci:fedora44"
-umoci unpack --rootless --image "$work/fedora-oci:fedora44" "$work/fedora-unpacked"
 export SILIQUE_FEDORA_ROOTFS="$work/fedora-unpacked/rootfs"
+# The unpacked rootfs plus its installed build dependencies are cached against
+# the resolved image digest: a new Fedora image invalidates the entry, while a
+# runner-image or toolchain change does not.
+if [[ -n "$cache" && -d "$cache/fedora-unpacked/rootfs" &&
+      -f "$cache/fedora-unpacked/$rootfs_marker" &&
+      "$(head -n 1 "$cache/fedora-unpacked/$rootfs_marker")" == "$digest" ]]; then
+  echo "Restoring the Fedora 44 rootfs from cache ($digest)."
+  cp -a "$cache/fedora-unpacked" "$work/fedora-unpacked"
+else
+  echo 'Preparing the Fedora 44 rootfs (cold path).'
+  cache_dirty=1
+  image="docker://$fedora_image"
+  skopeo copy "$image" "oci:$work/fedora-oci:fedora44"
+  umoci unpack --rootless --image "$work/fedora-oci:fedora44" "$work/fedora-unpacked"
+  printf '%s\n' "$digest" > "$work/fedora-unpacked/$rootfs_marker"
+fi
 # PRoot's simulated root cannot perform Fedora 44 DNF transactions reliably.
 # Use a real container on this disposable runner, writing only the guest rootfs.
 # PRoot remains unprivileged for rpmbuild and GUI/runtime compatibility tests.
@@ -66,8 +108,11 @@ fedora_container=(docker run --rm \
   --mount "type=bind,source=$SILIQUE_FEDORA_ROOTFS,target=/target" \
   --mount "type=bind,source=$work/fedora-packages,target=/packages,readonly" \
   "$fedora_image")
-"${fedora_container[@]}" /usr/bin/dnf --installroot=/target --releasever=44 \
-  install -y rpm-build gtk4 libsecret libstdc++ glibc mesa-libGL mesa-libEGL libepoxy libX11 gnome-keyring dbus-daemon
+if [[ ! -f "$work/fedora-unpacked/$rootfs_marker.installed" ]]; then
+  "${fedora_container[@]}" /usr/bin/dnf --installroot=/target --releasever=44 \
+    install -y rpm-build gtk4 libsecret libstdc++ glibc mesa-libGL mesa-libEGL libepoxy libX11 gnome-keyring dbus-daemon
+  printf '%s\n' "$digest" > "$work/fedora-unpacked/$rootfs_marker.installed"
+fi
 
 stage application-tests
 "$SILIQUE_GTK4_SDK/bin/flutter" pub get
@@ -112,5 +157,12 @@ mkdir -p packages/linux/verification
 cp "$work/pointer-position.json" "$work/settings-scroll.json" \
   "$work/installed-ubuntu.json" "$work/installed-fedora.json" "$work/fedora-image.json" \
   packages/linux/verification/
+stage cache-save
+if [[ -n "$cache" && -n "$cache_key" && "$cache_dirty" == 1 ]]; then
+  echo "Saving the warm cache for $cache_key"
+  rm -rf "$cache/flutter-gtk4" "$cache/fedora-unpacked"
+  cp -a "$SILIQUE_GTK4_SDK" "$cache/flutter-gtk4"
+  cp -a "$work/fedora-unpacked" "$cache/fedora-unpacked"
+fi
 stage complete
 printf 'Linux GTK4 engine, application, native wheel regression and installed packages verified.\n'

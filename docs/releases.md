@@ -58,3 +58,27 @@ Końcowe pliki: [prywatne wydanie 0.1.1](https://github.com/Haniewicz/silique-ap
 ## Silique 0.2.0 (2026-10-20)
 
 Zmieniono markę, nazwy repozytoriów, interfejs, paczki, katalog projektu i serwer LXC CT 100. Zasady identyfikatorów zgodności i przeniesienia danych opisuje [rebrand](rebrand.md). Zestaw: 14 testów lokalnych (w tym migracja zaszyfrowanych danych), dwa dodatkowe testy integracyjne z serwerem, trzy testy widoków z odświeżonymi obrazami oraz czysta analiza. Serwer ma 8 zaliczonych testów, działającą kopię SQLite i snapshot sprzed zmiany nazwy.
+
+## Linux GTK4 na GitHub Actions (od 0.2.58)
+
+Od decyzji właściciela z 2026-11-15 pakiety Linux buduje ręczny workflow
+`linux.yml` w publicznym repozytorium instalatorów na standardowym runnerze
+`ubuntu-24.04` — tej samej wersji systemu co dotychczasowy CT 104 (glibc 2.39,
+GTK4 4.14.5), więc baza zgodności pakietów się nie zmienia. Znikają zależności
+od homelabu: start kontenera, `proot`, seedowanie `libsqlite3` i `scp` artefaktów.
+
+`tool/ci_linux_gtk4.sh` używa cache Actions dla dwóch najdroższych wejść:
+zbudowanego silnika GTK4 i rootfs Fedory 44 z zależnościami budowania. Klucz
+cache to hash patcha silnika oraz skryptów bootstrap/buildera; wpisy mają markery
+(klucz / digest obrazu Fedory), więc nieaktualny wpis jest przebudowywany, a nie
+zaufany. Zimny run trwa ~40 min, ciepły powinien zejść do ~10–20 min. Repozytorium
+instalatorów jest publiczne, więc minuty Actions są bez limitu (limit 10 GB
+dotyczy tylko rozmiaru cache).
+
+`silique collect ... --linux-run ID` pobiera artefakt `silique-linux-gtk4-candidate`
+i weryfikuje `conclusion=success`, nazwę workflow, `linux-build.json` (wersja i
+build zgodne z SHA źródła) oraz wszystkie trzy sumy z `SHA256SUMS-Linux.txt`.
+`silique linux-build` (CT 104) pozostaje jako ścieżka awaryjna i szybka kontrola
+pakowania bez czekania na runner.
+
+Pierwsze wydanie tą ścieżką: 0.2.58.
