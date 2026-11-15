@@ -2714,6 +2714,16 @@ class Notebook {
       // retry the same bytes, revision IDs and batch ID across application restarts.
       batch = {'batchId': _uuid.v4(), 'revisions': pending};
       storage.putBatch(vault.id, batch);
+    } else {
+      // A durable batch from an earlier pass may still cite an image whose local
+      // asset was lost in the meantime. Drop those ids (never the note payload)
+      // and persist the filtered batch under a fresh batch id so the old id can
+      // not collide by hash with the new contents.
+      final filtered = _batchWithAvailableImages(vault, batch);
+      if (filtered != null) {
+        batch = _rebatch(batch, filtered);
+        storage.putBatch(vault.id, batch);
+      }
     }
     await _uploadImages(vault);
     final ids = (batch['revisions'] as List)
@@ -2753,14 +2763,25 @@ class Notebook {
   }
 
   /// Re-uploads every image of [vault] and retries [batch] exactly once after
-  /// a `409 "Image not uploaded yet"`. Bounded: on a second identical failure
-  /// it throws a readable error instead of looping or leaking the raw server
-  /// message. Images and notes stay safe locally.
+  /// a `409 "Image not uploaded yet"`. Images that the server reports `purged`
+  /// (or that have no local asset) are dropped from the retried batch's `images`
+  /// so the retry can succeed; the note payloads are left untouched. Bounded: on
+  /// a second identical failure it throws a readable error instead of looping or
+  /// leaking the raw server message. Images and notes stay safe locally.
   Future<void> _selfHealImagesThenRetryBatch(Vault vault, Json batch) async {
     storage.markAllImagesPending(vault.id);
-    await _uploadImages(vault);
+    final unusable = await _uploadImages(vault);
+    var healed = batch;
+    final filtered = _batchWithAvailableImages(vault, healed);
+    if (filtered != null) healed = _rebatch(healed, filtered);
+    // A purged image may still have a local asset, so filter it explicitly too.
+    final without = _batchWithoutImages(vault, healed, unusable);
+    if (without != null) healed = _rebatch(healed, without);
+    if (!identical(healed, batch)) {
+      storage.putBatch(vault.id, healed);
+    }
     try {
-      await _sendBatch(vault, batch);
+      await _sendBatch(vault, healed);
     } on ApiException catch (error) {
       if (error.status == 409 && error.message.contains('Image not uploaded yet')) {
         throw StateError(
@@ -2775,7 +2796,10 @@ class Notebook {
   }
 
   /// Envelopes one wire revision for a batch, attaching image references for
-  /// ordinary notes and leaving hidden envelopes untouched.
+  /// ordinary notes and leaving hidden envelopes untouched. Only image ids with
+  /// a locally present asset are included: an id without local bytes can never
+  /// satisfy the server's manifest check, and the image is already irrecoverably
+  /// lost locally, so the wire omits it rather than blocking the batch forever.
   Future<Json> _revisionWire(Vault vault, Revision revision) async {
     final wire = revision.toWire();
     final outer = await _hiddenOuter(revision);
@@ -2789,8 +2813,86 @@ class Notebook {
         .map((m) => m.group(1)!)
         .toSet()
         .toList();
-    if (images.isNotEmpty) wire['images'] = images;
+    final available = images
+        .where((id) => storage.imageAsset(vault.id, id) != null)
+        .toList();
+    if (available.isNotEmpty) wire['images'] = available;
     return wire;
+  }
+
+  /// Returns a copy of [batch] whose revisions cite only images with a locally
+  /// present asset, keeping the original [batch]'s `batchId`, or `null` when
+  /// nothing was removed. The note payload is never modified: only the `images`
+  /// field is filtered. The caller assigns a fresh `batchId` before persisting.
+  Json? _batchWithAvailableImages(Vault vault, Json batch) {
+    var removedAny = false;
+    final revisions = <Json>[];
+    for (final raw in batch['revisions'] as List) {
+      final revision = raw as Json;
+      final images = (revision['images'] as List?)?.cast<String>();
+      if (images == null || images.isEmpty) {
+        revisions.add(revision);
+        continue;
+      }
+      final available = images
+          .where((id) => storage.imageAsset(vault.id, id) != null)
+          .toList();
+      if (available.length != images.length) removedAny = true;
+      final copy = Map<String, dynamic>.from(revision);
+      if (available.isEmpty) {
+        copy.remove('images');
+      } else {
+        copy['images'] = available;
+      }
+      revisions.add(copy);
+    }
+    if (!removedAny) return null;
+    return {
+      'batchId': batch['batchId'],
+      'revisions': revisions,
+    };
+  }
+
+  /// Returns a copy of [batch] with every id in [unusable] removed from each
+  /// revision's `images`, keeping the original [batch]'s `batchId`, or `null`
+  /// when nothing was removed. Used for `purged` images that still have a local
+  /// asset (so `_batchWithAvailableImages` alone would keep them). The note
+  /// payload is never modified; the caller assigns a fresh `batchId`.
+  Json? _batchWithoutImages(Vault vault, Json batch, Set<String> unusable) {
+    if (unusable.isEmpty) return null;
+    var removedAny = false;
+    final revisions = <Json>[];
+    for (final raw in batch['revisions'] as List) {
+      final revision = raw as Json;
+      final images = (revision['images'] as List?)?.cast<String>();
+      if (images == null || images.isEmpty) {
+        revisions.add(revision);
+        continue;
+      }
+      final kept = images.where((id) => !unusable.contains(id)).toList();
+      if (kept.length != images.length) removedAny = true;
+      final copy = Map<String, dynamic>.from(revision);
+      if (kept.isEmpty) {
+        copy.remove('images');
+      } else {
+        copy['images'] = kept;
+      }
+      revisions.add(copy);
+    }
+    if (!removedAny) return null;
+    return {
+      'batchId': batch['batchId'],
+      'revisions': revisions,
+    };
+  }
+
+  /// Returns [batch] unchanged when [replacement] is `null`, otherwise the
+  /// replacement re-keyed under a freshly minted `batchId`. Re-filtering a batch
+  /// changes its contents, so it must never reuse the old id, which could
+  /// collide by hash with the previous, differing request.
+  Json _rebatch(Json batch, Json? replacement) {
+    if (replacement == null) return batch;
+    return {...replacement, 'batchId': _uuid.v4()};
   }
 
   /// Sends one durable [batch] and acknowledges it locally on a complete,
