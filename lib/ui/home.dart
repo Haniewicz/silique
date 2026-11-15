@@ -16,6 +16,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../main.dart' show notebookProvider;
 import '../core/models.dart';
+import '../core/note_sections.dart';
 import '../l10n/app_language.dart';
 import '../core/search.dart';
 import '../core/span_size.dart';
@@ -4806,6 +4807,21 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _noteList(bool mobile) {
     final list = filtered;
+    // The flat render list: a header (String?) paired with the note it
+    // precedes. Sections come from `buildNoteSections`, which groups by date
+    // only for the default sort with no query; otherwise a single flat,
+    // headerless section keeps the historical ordering.
+    final rows = <(String?, String?, Note)>[
+      for (final section in buildNoteSections(
+        list,
+        sort: _sort,
+        filter: _filter,
+        query: _query,
+        now: DateTime.now(),
+      ))
+        for (final note in section.notes)
+          (section.titlePl, section.titleEn, note),
+    ];
     final searching = mobile && MediaQuery.viewInsetsOf(context).bottom > 0;
     return Container(
       color: sidebar.withValues(alpha: .25),
@@ -5137,21 +5153,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       horizontal: mobile ? 9 : 10,
                       vertical: 8,
                     ),
-                    itemCount: list.length,
+                    itemCount: rows.length,
                     itemBuilder: (ctx, index) {
                       Localizations.localeOf(ctx);
-                      final note = list[index];
-                      final header = index == 0
-                          ? (note.favorite
-                                ? tr('Przypięte', 'Pinned')
-                                : tr('Notatki', 'Notes'))
-                          : list[index - 1].favorite && !note.favorite
-                          ? tr('Pozostałe', 'Other notes')
+                      final (titlePl, titleEn, note) = rows[index];
+                      final header = titlePl != null && titleEn != null
+                          ? tr(titlePl, titleEn)
                           : null;
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
-                          if (header != null && !mobile)
+                          if (header != null)
                             Padding(
                               padding: const EdgeInsets.fromLTRB(6, 5, 6, 8),
                               child: Text(
@@ -6323,6 +6335,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     key: ValueKey(
                       'note-scroll-${_selected!.id}-${_source ? 'source' : 'live'}',
                     ),
+                    // Desktop keeps the note's title, tag row and body in a
+                    // centered column capped at 820 px so long lines stay
+                    // readable; the toolbar, tabs and status stay full width.
+                    columnMaxWidth: mobile ? null : 820,
                     heading: _noteHeading(mobile, tags),
                     onBlankTap: _focusBodyEnd,
                     bodyBuilder: (scroll) => _source

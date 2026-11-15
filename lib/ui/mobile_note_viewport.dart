@@ -14,6 +14,7 @@ class MobileNoteViewport extends StatefulWidget {
     required this.bodyBuilder,
     this.selectionController,
     this.onBlankTap,
+    this.columnMaxWidth,
   });
 
   final Widget heading;
@@ -23,6 +24,11 @@ class MobileNoteViewport extends StatefulWidget {
   /// body already owns its own edge scrolling (the live Markdown editor).
   final TextEditingController? selectionController;
   final VoidCallback? onBlankTap;
+
+  /// Maximum width of the heading/body content column. When set, the document
+  /// content is centered within the viewport while the toolbar, breadcrumb and
+  /// status footer stay full width. Null keeps the historical stretch layout.
+  final double? columnMaxWidth;
 
   @override
   State<MobileNoteViewport> createState() => _MobileNoteViewportState();
@@ -59,24 +65,31 @@ class _MobileNoteViewportState extends State<MobileNoteViewport> {
         key: const Key('mobile-note-scroll'),
         controller: _scroll,
         physics: const ClampingScrollPhysics(),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            widget.heading,
-            KeyedSubtree(
-              key: _body,
-              child: controller == null
-                  ? body
-                  :
-                    // Stop native reveal before it reaches the document viewport,
-                    // just like the live editor's field-local selection boundary.
-                    TextSelectionEdgeAutoScroll(
-                      controller: controller,
-                      scrollController: _scroll,
-                      child: body,
-                    ),
+        child: Center(
+          child: ConstrainedBox(
+            constraints: BoxConstraints(
+              maxWidth: widget.columnMaxWidth ?? double.infinity,
             ),
-          ],
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                widget.heading,
+                KeyedSubtree(
+                  key: _body,
+                  child: controller == null
+                      ? body
+                      :
+                        // Stop native reveal before it reaches the document viewport,
+                        // just like the live editor's field-local selection boundary.
+                        TextSelectionEdgeAutoScroll(
+                          controller: controller,
+                          scrollController: _scroll,
+                          child: body,
+                        ),
+                ),
+              ],
+            ),
+          ),
         ),
       ),
     );

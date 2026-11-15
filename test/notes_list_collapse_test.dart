@@ -35,7 +35,7 @@ void main() {
     expect(sidebarToggle(), findsOneWidget);
     expect(oldCollapseInFilterRow(), findsNothing);
     expect(oldToggleInTabBar(), findsNothing);
-    final before = tester.getTopLeft(titleField()).dx;
+    final beforeCenter = tester.getRect(titleField()).center.dx;
     await tester.tap(sidebarToggle());
     await tester.pumpAndSettle();
     expect(searchField(), findsNothing);
@@ -50,10 +50,12 @@ void main() {
       findsOneWidget,
       reason: 'the sidebar toggle stays reachable while the list is hidden',
     );
+    // The note column is centered within the editor, so freeing 281 px of
+    // panel width shifts the column's center by exactly half of it.
     expect(
-      tester.getTopLeft(titleField()).dx - before,
-      closeTo(-281, 1),
-      reason: 'the editor takes over the collapsed panel minus the restore strip (320 px + divider - 40 px)',
+      tester.getRect(titleField()).center.dx - beforeCenter,
+      closeTo(-140.5, 1),
+      reason: 'the editor takes over the collapsed panel minus the restore strip (320 px + divider - 40 px), split around the centered note column',
     );
     await tester.tap(sidebarToggle());
     await tester.pumpAndSettle();
@@ -64,7 +66,7 @@ void main() {
       note.title,
       reason: 'the previously selected note stays open in the editor',
     );
-    expect(tester.getTopLeft(titleField()).dx, closeTo(before, 1));
+    expect(tester.getRect(titleField()).center.dx, closeTo(beforeCenter, 1));
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
