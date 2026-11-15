@@ -48,9 +48,9 @@ class SiliqueSyncService : Service() {
         // Notification channels exist since API 26; below that, no channel is
         // needed and the plain legacy builder is used instead.
         if (Build.VERSION.SDK_INT < 26) return
-        val manager = context.getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        val name = SiliqueLanguage.text(context, R.string.native_sync_channel_name)
-        val description = SiliqueLanguage.text(context, R.string.native_sync_channel_description)
+        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        val name = SiliqueLanguage.text(this, R.string.native_sync_channel_name)
+        val description = SiliqueLanguage.text(this, R.string.native_sync_channel_description)
         val channel = NotificationChannel(CHANNEL_ID, name, NotificationManager.IMPORTANCE_LOW)
         channel.description = description
         manager.createNotificationChannel(channel)
@@ -78,7 +78,7 @@ class SiliqueSyncService : Service() {
             .setOngoing(true)
             .setOnlyAlertOnce(true)
             .setPriority(Notification.PRIORITY_LOW)
-            .setCategory(Notification.CATEGORY_SYNC)
+            .setCategory(Notification.CATEGORY_PROGRESS)
         pending?.let { builder.setContentIntent(it) }
         val notification = builder.build()
         val type = dataSyncType()
