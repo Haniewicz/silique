@@ -40,6 +40,7 @@ import 'mobile_note_viewport.dart';
 import 'vault_import_dialog.dart';
 import 'vault_delete_dialog.dart';
 import 'vault_export_dialog.dart';
+import 'sync_status_dialog.dart';
 
 part 'home_android_widgets.dart';
 
@@ -2717,6 +2718,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   });
 
+  Future<void> _openSyncStatus(Vault v) async {
+    if (!mounted) return;
+    await showSyncStatusDialog(context, repo, v);
+    if (mounted) setState(() {});
+  }
+
   Future<void> _manageVaults() async {
     await _flush();
     if (!mounted) return;
@@ -2750,6 +2757,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 trailing: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    if (v.syncEnabled)
+                      IconButton(
+                        tooltip: tr(
+                          'Status synchronizacji',
+                          'Sync status',
+                        ),
+                        icon: const Icon(Icons.sync),
+                        onPressed: repo.vaultDeletionPending(v.id)
+                            ? null
+                            : () {
+                                Navigator.pop(ctx);
+                                unawaited(_openSyncStatus(v));
+                              },
+                      ),
                     IconButton(
                       tooltip: tr('Eksportuj vault', 'Export vault'),
                       icon: const Icon(Icons.download_outlined),
@@ -5518,11 +5539,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       indicator = Icon(Icons.cloud_outlined, size: size, color: muted);
     }
 
+    final currentVault = vault;
     return Tooltip(
       key: const Key('sync-status'),
       message: label,
       child: InkWell(
-        onTap: vault?.syncEnabled == true ? () => _sync() : null,
+        onTap: currentVault == null || currentVault.syncEnabled != true
+            ? null
+            : (repo.syncStatus(currentVault.id)?.failing ?? false)
+                ? () => _openSyncStatus(currentVault)
+                : () => _sync(),
         borderRadius: BorderRadius.circular(8),
         child: Padding(padding: const EdgeInsets.all(3), child: indicator),
       ),

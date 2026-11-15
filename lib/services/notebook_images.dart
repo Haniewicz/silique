@@ -336,6 +336,15 @@ extension NotebookImages on Notebook {
     return unusable;
   }
 
+  /// Downloads every image referenced by this vault's visible notes.
+  ///
+  /// A note body may cite an image the server never received (a lost or purged
+  /// attachment): the server answers such a manifest request with `404`. That
+  /// must not fail the whole sync pass — one unavailable attachment would
+  /// otherwise abort every pass for the vault before its push phase, leaving the
+  /// device permanently stalled on a note it can still read. The image stays
+  /// remote-only and the editor keeps showing its placeholder; every non-404
+  /// failure (transport, identity mismatch, decryption) is still fatal.
   Future<void> _cacheImages(Vault vault) async {
     final ids = <String>{
       for (final note in notes[vault.id]?.values ?? <Note>[])
@@ -345,7 +354,11 @@ extension NotebookImages on Notebook {
               .map((m) => m.group(1)!),
     };
     for (final id in ids) {
-      await _ensureImage(vault.id, id);
+      try {
+        await _ensureImage(vault.id, id);
+      } on ApiException catch (error) {
+        if (error.status != 404) rethrow;
+      }
     }
   }
 }

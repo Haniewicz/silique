@@ -28,6 +28,7 @@ part 'notebook_import.dart';
 part 'notebook_export.dart';
 part 'notebook_hidden_sync.dart';
 part 'notebook_vault_deletion.dart';
+part 'notebook_reset.dart';
 
 class _NotebookOperation {
   bool active = true;
@@ -2146,6 +2147,275 @@ class Notebook {
 
   Future<void> sync() => _operation(_sync, failureKey: 'sync');
 
+  /// Whether a sync pass is currently running. The forced-resync actions refuse
+  /// to run while this is true instead of racing the in-flight pass.
+  bool get syncing => _syncing;
+
+  /// Locally recorded sync status for [vaultId], or null when never recorded.
+  VaultSyncStatus? syncStatus(String vaultId) => storage.syncStatus(vaultId);
+
+  /// Revisions of [vaultId] still awaiting an upload acknowledgement.
+  int pendingCount(String vaultId) => storage.pendingCount(vaultId);
+
+  /// Notes in [vaultId] whose local head count is greater than one.
+  int divergedNoteCount(String vaultId) => storage.divergedNoteCount(vaultId);
+
+  /// Replays the whole changelog of the given vault(s) with a pull-only pass:
+  /// the cursor is reset to `0`, nothing is pushed and the durable batch is left
+  /// untouched. The replayed history is then materialised through the normal
+  /// reconcile and image cache, exactly as a regular pass would — so this can
+  /// create the same local merge/conflict revisions a regular pass creates, but
+  /// it never modifies the server. Cures a stuck/bogus cursor and any page a
+  /// stale cursor skipped, and it is the only recovery path for a vault whose
+  /// push phase keeps failing (a regular pass never reaches its pull).
+  Future<void> forceFullPull({String? vaultId}) {
+    if (_syncing) {
+      return Future.error(
+        StateError(
+          tr(
+            'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+            'A sync is in progress — wait for it to finish.',
+          ),
+        ),
+      );
+    }
+    return _operation(
+      () => _forceFullPull(vaultId: vaultId),
+      failureKey: 'force-full-pull',
+    );
+  }
+
+  Future<void> _forceFullPull({String? vaultId}) async {
+    if (_updatePrepared && !_insideOperation) return;
+    if (_syncing) {
+      throw StateError(
+        tr(
+          'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+          'A sync is in progress — wait for it to finish.',
+        ),
+      );
+    }
+    final client = api;
+    if (client == null) {
+      throw StateError(
+        tr(
+          'Brak połączenia z serwerem. Zaloguj się, aby kontynuować.',
+          'Not connected to a server. Sign in to continue.',
+        ),
+      );
+    }
+    final targets = (vaultId == null
+            ? vaults
+                .where(
+                  (v) =>
+                      !vaultDeletionPending(v.id) &&
+                      v.syncEnabled &&
+                      _ownerIsCurrent(v.owner) &&
+                      unlocked.containsKey(v.id),
+                )
+                .map((v) => v.id)
+                .toList()
+            : [vaultId])
+        .where((id) => unlocked.containsKey(id))
+        .toList();
+    if (targets.isEmpty) {
+      throw StateError(
+        tr(
+          'Brak odblokowanego vaulta do resynchronizacji.',
+          'No unlocked vault to resynchronize.',
+        ),
+      );
+    }
+    _syncing = true;
+    try {
+      for (final id in targets) {
+        storage.setCursor(id, 0);
+      }
+      for (final id in targets) {
+        final v = vaults.firstWhere(
+          (x) => x.id == id,
+          orElse: () => throw StateError('Unknown vault'),
+        );
+        // Pull-only: replay every page from cursor 0, no push, no reconcile.
+        var more = true;
+        while (more) {
+          final page = await client.request(
+            'GET',
+            '/v1/vaults/$id/changes?cursor=${storage.cursor(id)}',
+          );
+          await serialized(() async {
+            for (final noteId in (page['purged'] as List? ?? const [])) {
+              await _acceptPurge(id, noteId as String);
+            }
+            final incoming = <Revision>[];
+            for (final item in page['revisions'] as List) {
+              final j = item as Json;
+              final r = Revision(
+                id: j['id'] as String,
+                vaultId: id,
+                noteId: j['noteId'] as String,
+                parents: (j['parents'] as List).cast<String>(),
+                payload: j['payload'] as String,
+                seq: j['seq'] as int,
+              );
+              if (_hiddenIdentity(id, r.noteId)) continue;
+              final decoded = await _hiddenOuter(r);
+              if (decoded['type'] == _HiddenSync.configKind) {
+                await _rememberHiddenConfig(id, decoded['config'] as Json);
+                incoming.add(r);
+                continue;
+              }
+              if (decoded['type'] == _HiddenSync.kind) {
+                await _acceptHidden(r, decoded);
+                incoming.add(r);
+                continue;
+              }
+              final plain = Note.fromJson(decoded);
+              if (plain.id != r.noteId || plain.vaultId != id) {
+                throw FormatException(
+                  tr(
+                    'Serwer zwrócił niezgodną tożsamość notatki.',
+                    'The server returned a mismatched note identity.',
+                  ),
+                );
+              }
+              incoming.add(r);
+            }
+            storage.atomic(() {
+              for (final r in incoming) {
+                storage.putRevision(r);
+              }
+              storage.setCursor(id, page['cursor'] as int);
+            });
+          });
+          more = page['hasMore'] as bool;
+        }
+        await serialized(() => _reconcile(v));
+        // Materialise the replayed history: without caching, images that exist
+        // only on the server would stay placeholders after a forced full pull.
+        await _cacheImages(v);
+      }
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  /// Drains the durable batch plus the pending queue for the given vault(s)
+  /// using repeated bounded `_push` calls, and reports how many revisions remain
+  /// after the flush (0 = fully drained). Refuses to run while [syncing].
+  Future<int> forceFlushPending({String? vaultId}) {
+    if (_syncing) {
+      return Future.error(
+        StateError(
+          tr(
+            'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+            'A sync is in progress — wait for it to finish.',
+          ),
+        ),
+      );
+    }
+    return _operation(
+      () => _forceFlushPending(vaultId: vaultId),
+      failureKey: 'force-flush-pending',
+    );
+  }
+
+  Future<int> _forceFlushPending({String? vaultId}) async {
+    if (_updatePrepared && !_insideOperation) return 0;
+    if (_syncing) {
+      throw StateError(
+        tr(
+          'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+          'A sync is in progress — wait for it to finish.',
+        ),
+      );
+    }
+    final client = api;
+    if (client == null) {
+      throw StateError(
+        tr(
+          'Brak połączenia z serwerem. Zaloguj się, aby kontynuować.',
+          'Not connected to a server. Sign in to continue.',
+        ),
+      );
+    }
+    final targets = (vaultId == null
+            ? vaults
+                .where(
+                  (v) =>
+                      !vaultDeletionPending(v.id) &&
+                      v.syncEnabled &&
+                      _ownerIsCurrent(v.owner) &&
+                      unlocked.containsKey(v.id),
+                )
+                .map((v) => v.id)
+                .toList()
+            : [vaultId])
+        .where((id) => unlocked.containsKey(id))
+        .toList();
+    if (targets.isEmpty) {
+      throw StateError(
+        tr(
+          'Brak odblokowanego vaulta do wysłania zmian.',
+          'No unlocked vault to flush.',
+        ),
+      );
+    }
+    _syncing = true;
+    try {
+      var remaining = 0;
+      for (final id in targets) {
+        final v = vaults.firstWhere(
+          (x) => x.id == id,
+          orElse: () => throw StateError('Unknown vault'),
+        );
+        // A bounded number of passes: each `_push` drains at most one batch, so
+        // this flushes the durable batch plus the pending queue without ever
+        // looping forever on a server that keeps rejecting.
+        for (var i = 0; i < 200; i++) {
+          final before = storage.pendingCount(id);
+          final hadBatch = storage.batch(id) != null;
+          if (before == 0 && !hadBatch) break;
+          await _push(v);
+          final after = storage.pendingCount(id);
+          if (after >= before && storage.batch(id) == null) break;
+        }
+        remaining += storage.pendingCount(id);
+      }
+      return remaining;
+    } finally {
+      _syncing = false;
+    }
+  }
+
+  /// Makes this device's local materialised state the single source of truth for
+  /// [vaultId]: every note's former heads are retired by a new revision citing
+  /// the server-known heads, locally deleted notes and remote-only heads get a
+  /// deletion revision, and optional losing-version copies preserve stale
+  /// content. See docs/sync-recovery.md "Feature 3".
+  Future<VaultResetReport> resetToLocalSourceOfTruth(
+    String vaultId, {
+    bool keepLosingCopies = true,
+  }) {
+    if (_syncing) {
+      return Future.error(
+        StateError(
+          tr(
+            'Synchronizacja jest w toku — poczekaj, aż się zakończy.',
+            'A sync is in progress — wait for it to finish.',
+          ),
+        ),
+      );
+    }
+    return _operation(
+      () => _resetToLocalSourceOfTruth(
+        vaultId,
+        keepLosingCopies: keepLosingCopies,
+      ),
+      failureKey: 'reset-source-of-truth',
+    );
+  }
+
   /// Rebuilds [syncIssues] for every local vault the `_sync` content gate would
   /// reject, so a skip is reported instead of ending the pass as a silent no-op.
   /// Cleared and repopulated on every run; a vault that actually syncs emits no
@@ -2612,6 +2882,13 @@ class Notebook {
           }
         }
       });
+      // Per-vault sync, with failures isolated to their own vault: a throw in
+      // one vault records its status and lets the remaining vaults continue.
+      // The first error is rethrown once the loop is finished, preserving the
+      // existing UI error surface. A 410 tombstone keeps its current handling
+      // from inside the same per-vault catch.
+      Object? firstError;
+      StackTrace? firstStackTrace;
       for (final v in vaults.where(
         (v) =>
             !vaultDeletionPending(v.id) &&
@@ -2619,67 +2896,37 @@ class Notebook {
             _ownerIsCurrent(v.owner) &&
             unlocked.containsKey(v.id),
       )) {
-        await serialized(() => _finishHiddenRemoteMoves(v));
-        await serialized(() => _migrateHidden(v));
-        await _push(v);
-        var more = true;
-        while (more) {
-          final page = await api!.request(
-            'GET',
-            '/v1/vaults/${v.id}/changes?cursor=${storage.cursor(v.id)}',
-          );
-          await serialized(() async {
-            for (final noteId in (page['purged'] as List? ?? const [])) {
-              await _acceptPurge(v.id, noteId as String);
-            }
-            final incoming = <Revision>[];
-            for (final item in page['revisions'] as List) {
-              final j = item as Json;
-              final r = Revision(
-                id: j['id'] as String,
-                vaultId: v.id,
-                noteId: j['noteId'] as String,
-                parents: (j['parents'] as List).cast<String>(),
-                payload: j['payload'] as String,
-                seq: j['seq'] as int,
-              );
-              if (_hiddenIdentity(v.id, r.noteId)) continue;
-              final decoded = await _hiddenOuter(r);
-              if (decoded['type'] == _HiddenSync.configKind) {
-                await _rememberHiddenConfig(v.id, decoded['config'] as Json);
-                incoming.add(r);
-                continue;
-              }
-              if (decoded['type'] == _HiddenSync.kind) {
-                await _acceptHidden(r, decoded);
-                incoming.add(r);
-                continue;
-              }
-              final plain = Note.fromJson(decoded);
-              if (plain.id != r.noteId || plain.vaultId != v.id) {
-                throw FormatException(
-                  tr(
-                    'Serwer zwrócił niezgodną tożsamość notatki.',
-                    'The server returned a mismatched note identity.',
-                  ),
-                );
-              }
-              incoming.add(r);
-            }
-            storage.atomic(() {
-              for (final r in incoming) {
-                storage.putRevision(r);
-              }
-              storage.setCursor(v.id, page['cursor'] as int);
-            });
-          });
-          more = page['hasMore'] as bool;
+        final attemptedAt = DateTime.now().toUtc();
+        try {
+          await _syncVault(v);
+          _recordSyncSuccess(v.id, attemptedAt);
+        } catch (error, stack) {
+          final match = error is ApiException
+              ? RegExp(r'^/v1/vaults/([a-fA-F0-9-]{36})(?:/|$)')
+                    .firstMatch(error.path ?? '')
+              : null;
+          if (error is ApiException &&
+              error.status == 410 &&
+              match != null &&
+              api == client &&
+              session?.owner == owner) {
+            await serialized(() => _acceptVaultTombstone(match.group(1)!, owner));
+            continue;
+          }
+          _recordSyncFailure(v.id, attemptedAt, error);
+          firstError ??= error;
+          firstStackTrace ??= stack;
         }
-        await serialized(() => _reconcile(v));
-        await _cacheImages(v);
-        await _push(v);
+      }
+      final recordedError = firstError;
+      final recordedStack = firstStackTrace;
+      if (recordedError != null && recordedStack != null) {
+        Error.throwWithStackTrace(recordedError, recordedStack);
       }
     } on ApiException catch (error) {
+      // Safety net for a 410 that escapes outside the per-vault loop (for
+      // example from the automatic re-binding pass). The per-vault loop already
+      // handles its own 410s and only rethrows non-410 (or unmatching) errors.
       final match = RegExp(r'^/v1/vaults/([a-fA-F0-9-]{36})(?:/|$)')
           .firstMatch(error.path ?? '');
       if (error.status == 410 &&
@@ -2693,6 +2940,102 @@ class Notebook {
     } finally {
       _syncing = false;
     }
+  }
+
+  /// One vault's content sync: hidden finish/migrate, push, pull to the latest
+  /// cursor, reconcile, cache images, and a final push. Throws on any failure;
+  /// the caller isolates the error per vault and records the sync status.
+  Future<void> _syncVault(Vault v) async {
+    await serialized(() => _finishHiddenRemoteMoves(v));
+    await serialized(() => _migrateHidden(v));
+    await _push(v);
+    var more = true;
+    while (more) {
+      final page = await api!.request(
+        'GET',
+        '/v1/vaults/${v.id}/changes?cursor=${storage.cursor(v.id)}',
+      );
+      await serialized(() async {
+        for (final noteId in (page['purged'] as List? ?? const [])) {
+          await _acceptPurge(v.id, noteId as String);
+        }
+        final incoming = <Revision>[];
+        for (final item in page['revisions'] as List) {
+          final j = item as Json;
+          final r = Revision(
+            id: j['id'] as String,
+            vaultId: v.id,
+            noteId: j['noteId'] as String,
+            parents: (j['parents'] as List).cast<String>(),
+            payload: j['payload'] as String,
+            seq: j['seq'] as int,
+          );
+          if (_hiddenIdentity(v.id, r.noteId)) continue;
+          final decoded = await _hiddenOuter(r);
+          if (decoded['type'] == _HiddenSync.configKind) {
+            await _rememberHiddenConfig(v.id, decoded['config'] as Json);
+            incoming.add(r);
+            continue;
+          }
+          if (decoded['type'] == _HiddenSync.kind) {
+            await _acceptHidden(r, decoded);
+            incoming.add(r);
+            continue;
+          }
+          final plain = Note.fromJson(decoded);
+          if (plain.id != r.noteId || plain.vaultId != v.id) {
+            throw FormatException(
+              tr(
+                'Serwer zwrócił niezgodną tożsamość notatki.',
+                'The server returned a mismatched note identity.',
+              ),
+            );
+          }
+          incoming.add(r);
+        }
+        storage.atomic(() {
+          for (final r in incoming) {
+            storage.putRevision(r);
+          }
+          storage.setCursor(v.id, page['cursor'] as int);
+        });
+      });
+      more = page['hasMore'] as bool;
+    }
+    await serialized(() => _reconcile(v));
+    await _cacheImages(v);
+    await _push(v);
+  }
+
+  /// Records a completed (successful) pass for [vaultId], clearing any prior
+  /// error so [VaultSyncStatus.failing] becomes false.
+  void _recordSyncSuccess(String vaultId, DateTime attemptedAt) {
+    storage.putSyncStatus(
+      vaultId,
+      VaultSyncStatus(
+        lastSuccessAt: attemptedAt,
+        lastAttemptAt: attemptedAt,
+      ),
+    );
+  }
+
+  /// Records a failed pass for [vaultId], preserving the last success so the
+  /// status keeps both sides of "has it ever synced, and is it failing now".
+  void _recordSyncFailure(
+    String vaultId,
+    DateTime attemptedAt,
+    Object error,
+  ) {
+    final previous = storage.syncStatus(vaultId);
+    storage.putSyncStatus(
+      vaultId,
+      VaultSyncStatus(
+        lastSuccessAt: previous?.lastSuccessAt,
+        lastAttemptAt: attemptedAt,
+        lastError: '$error',
+        lastErrorAt: attemptedAt,
+      ),
+    );
   }
 
   Future<void> _push(Vault vault) async {

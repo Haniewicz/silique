@@ -671,6 +671,9 @@ class NativeStorage implements NoteStorage {
         'CREATE TABLE IF NOT EXISTS cursors(vault_id TEXT PRIMARY KEY,cursor INTEGER NOT NULL)',
       );
       db.execute(
+        'CREATE TABLE IF NOT EXISTS sync_state(vault_id TEXT PRIMARY KEY,data TEXT NOT NULL)',
+      );
+      db.execute(
         'CREATE INDEX IF NOT EXISTS revisions_vault ON revisions(vault_id,note_id)',
       );
       db.execute(
@@ -696,6 +699,7 @@ class NativeStorage implements NoteStorage {
         'cursors',
         'image_assets',
         'image_chunks',
+        'sync_state',
       ]) {
         final column = table == 'vaults' ? 'id' : 'vault_id';
         String blocked(String row) {
@@ -1092,6 +1096,7 @@ class NativeStorage implements NoteStorage {
         'revisions',
         'batches',
         'cursors',
+        'sync_state',
       ]) {
         db.execute(
           'DELETE FROM $table WHERE vault_id IN (?,?,?,?,?)',
@@ -1262,6 +1267,15 @@ class NativeStorage implements NoteStorage {
   }
 
   @override
+  List<String> pendingIds(String vaultId) => db
+      .select(
+        'SELECT id FROM revisions WHERE vault_id=? AND pending=1 ORDER BY rowid',
+        [vaultId],
+      )
+      .map((r) => r['id'] as String)
+      .toList();
+
+  @override
   void markAllPending(String vaultId) {
     _requireWritable(vaultId);
     db.execute('UPDATE revisions SET pending=1 WHERE vault_id=?', [vaultId]);
@@ -1318,6 +1332,63 @@ class NativeStorage implements NoteStorage {
   void setCursor(String vaultId, int cursor) {
     _requireWritable(vaultId);
     db.execute('INSERT OR REPLACE INTO cursors VALUES(?,?)', [vaultId, cursor]);
+  }
+
+  @override
+  VaultSyncStatus? syncStatus(String vaultId) {
+    final rows = db.select('SELECT data FROM sync_state WHERE vault_id=?', [
+      vaultId,
+    ]);
+    return rows.isEmpty
+        ? null
+        : VaultSyncStatus.fromJson(jsonDecode(rows.first['data'] as String) as Json);
+  }
+
+  @override
+  void putSyncStatus(String vaultId, VaultSyncStatus status) {
+    _requireWritable(vaultId);
+    db.execute('INSERT OR REPLACE INTO sync_state VALUES(?,?)', [
+      vaultId,
+      jsonEncode(status.toJson()),
+    ]);
+  }
+
+  @override
+  int pendingCount(String vaultId) => db
+      .select(
+        'SELECT count(*) AS n FROM revisions WHERE vault_id=? AND pending=1',
+        [vaultId],
+      )
+      .single['n'] as int;
+
+  @override
+  int divergedNoteCount(String vaultId) {
+    // A note is diverged when it has more than one head: a local revision that
+    // no other revision in the same vault lists as a parent. Count distinct note
+    // ids whose head count exceeds one. Uses the same parent graph the sync
+    // pass computes via `Notebook.heads`, with no SQL JSON tricks.
+    final noteIds = db
+        .select('SELECT DISTINCT note_id FROM revisions WHERE vault_id=?', [
+      vaultId,
+    ]).map((r) => r['note_id'] as String);
+    var diverged = 0;
+    for (final noteId in noteIds) {
+      final heads = <String>{};
+      final parents = <String>{};
+      for (final row in db.select(
+        'SELECT id,parents FROM revisions WHERE vault_id=? AND note_id=?',
+        [vaultId, noteId],
+      )) {
+        heads.add(row['id'] as String);
+        for (final parent in (jsonDecode(row['parents'] as String) as List)
+            .cast<String>()) {
+          parents.add(parent);
+        }
+      }
+      heads.removeAll(parents);
+      if (heads.length > 1) diverged++;
+    }
+    return diverged;
   }
 
   @override

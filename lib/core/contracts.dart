@@ -63,11 +63,34 @@ abstract interface class NoteStorage {
   /// image is safe.
   void markAllImagesPending(String vaultId);
   List<Revision> pending(String vaultId);
+
+  /// Every revision id of [vaultId] still marked `pending=1`, in insertion
+  /// (DAG parent-before-child) order, without the batch-sized cap of [pending].
+  /// The reset retires the whole stuck queue at once, not only one page of it.
+  List<String> pendingIds(String vaultId);
+
   Json? batch(String vaultId);
   void putBatch(String vaultId, Json batch);
   void acknowledge(String vaultId, List<String> ids);
   int cursor(String vaultId);
   void setCursor(String vaultId, int cursor);
+
+  /// Locally recorded sync outcome for [vaultId], or `null` when the vault has
+  /// never recorded a pass. Local-only; never synced to the server.
+  VaultSyncStatus? syncStatus(String vaultId);
+
+  /// Persists [status] for [vaultId]. Local-only; never synced to the server.
+  void putSyncStatus(String vaultId, VaultSyncStatus status);
+
+  /// Number of revisions of [vaultId] still marked `pending=1` (not yet
+  /// acknowledged by the server). The UI shows it as "changes waiting to sync".
+  int pendingCount(String vaultId);
+
+  /// Number of notes in [vaultId] whose local head count is greater than one.
+  /// Computed from the same revision-parent graph the sync pass uses, so the
+  /// dialog reports real divergence instead of a SQL storage detail.
+  int divergedNoteCount(String vaultId);
+
   void atomic(void Function() operation);
   Future<void> mirror(Note note);
   Future<void> eraseNote(

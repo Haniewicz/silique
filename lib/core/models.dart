@@ -213,6 +213,51 @@ class Session {
   );
 }
 
+/// Locally recorded outcome of the last sync pass per vault. Never synced to
+/// the server: it exists so the UI can explain what the last pass actually did
+/// for each vault instead of flattening every failure into "offline".
+class VaultSyncStatus {
+  VaultSyncStatus({
+    this.lastSuccessAt,
+    this.lastAttemptAt,
+    this.lastError,
+    this.lastErrorAt,
+  });
+
+  final DateTime? lastSuccessAt;
+  final DateTime? lastAttemptAt;
+  final String? lastError;
+  final DateTime? lastErrorAt;
+
+  /// True when the most recent recorded failure is newer than the most recent
+  /// success (or there was never a success). A vault that has never attempted
+  /// a sync is not "failing" yet — nothing has gone wrong.
+  bool get failing =>
+      lastError != null &&
+      (lastSuccessAt == null ||
+          (lastErrorAt != null && lastErrorAt!.isAfter(lastSuccessAt!)));
+
+  Json toJson() => {
+    'lastSuccessAt': lastSuccessAt?.toIso8601String(),
+    'lastAttemptAt': lastAttemptAt?.toIso8601String(),
+    'lastError': lastError,
+    'lastErrorAt': lastErrorAt?.toIso8601String(),
+  };
+
+  factory VaultSyncStatus.fromJson(Json j) => VaultSyncStatus(
+    lastSuccessAt: j['lastSuccessAt'] == null
+        ? null
+        : DateTime.parse(j['lastSuccessAt'] as String),
+    lastAttemptAt: j['lastAttemptAt'] == null
+        ? null
+        : DateTime.parse(j['lastAttemptAt'] as String),
+    lastError: j['lastError'] as String?,
+    lastErrorAt: j['lastErrorAt'] == null
+        ? null
+        : DateTime.parse(j['lastErrorAt'] as String),
+  );
+}
+
 /// A vault that a sync pass decided not to push/pull, with the reason the UI
 /// can show instead of the previous silent skip.
 ///
@@ -243,4 +288,39 @@ class SyncIssue {
   final String reason;
   final String? owner;
   final String? sessionOwner;
+}
+
+/// Outcome of a source-of-truth reset (`resetToLocalSourceOfTruth`). Purely a
+/// report — the operation itself mutates storage and pushes revisions; every
+/// field here only summarises what happened so the UI can explain it.
+class VaultResetReport {
+  const VaultResetReport({
+    required this.notesRewritten,
+    required this.deletionsWritten,
+    required this.copiesKept,
+    required this.headsMerged,
+    required this.remainingDiverged,
+    required this.hiddenSkipped,
+  });
+
+  /// Number of notes whose local (non-deleted) document was written as the new
+  /// single source of truth over their former heads.
+  final int notesRewritten;
+
+  /// Number of deletion revisions written: locally deleted notes plus
+  /// remote-only heads (heads with no local document).
+  final int deletionsWritten;
+
+  /// Number of losing-version copies materialised as conflict notes.
+  final int copiesKept;
+
+  /// Total number of former head revisions retired by the reset.
+  final int headsMerged;
+
+  /// Notes still showing more than one head after the final pull. A fully
+  /// successful reset reports exactly zero.
+  final int remainingDiverged;
+
+  /// Hidden notes that the reset deliberately left untouched.
+  final int hiddenSkipped;
 }
