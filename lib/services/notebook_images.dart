@@ -267,9 +267,14 @@ extension NotebookImages on Notebook {
     return note.copyWith(body: body);
   }
 
-  Future<void> _uploadImages(Vault vault) async {
+  /// Uploads every pending image and returns the ids that turned out to be
+  /// unusable because the server reported them `purged`. A purged image is NOT
+  /// marked uploaded locally: it has no manifest on the server, so any batch
+  /// citing it would keep getting `409 "Image not uploaded yet"`.
+  Future<Set<String>> _uploadImages(Vault vault) async {
     final pending = storage.pendingImages(vault.id);
-    if (pending.isEmpty) return;
+    final unusable = <String>{};
+    if (pending.isEmpty) return unusable;
     final discovery = await api!.request('GET', '/.well-known/silique');
     if ((discovery['features'] as Json?)?['image_attachments'] != true) {
       throw StateError(
@@ -320,9 +325,15 @@ extension NotebookImages on Notebook {
             'chunkCount': manifest['chunks'],
           },
         );
+        storage.markImageUploaded(vault.id, id);
+      } else {
+        // The server rejected this image as purged: it can never satisfy the
+        // manifest requirement. Keep it unuploaded and report it as unusable so
+        // the caller can drop it from any batch that cites it.
+        unusable.add(id);
       }
-      storage.markImageUploaded(vault.id, id);
     }
+    return unusable;
   }
 
   Future<void> _cacheImages(Vault vault) async {
