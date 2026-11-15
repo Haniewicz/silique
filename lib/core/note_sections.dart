@@ -34,9 +34,7 @@ List<NoteSection> buildNoteSections(
   required DateTime now,
 }) {
   if (sort != 'updated' || query.trim().isNotEmpty) {
-    return [
-      NoteSection._(null, null, List.unmodifiable(notes)),
-    ];
+    return [NoteSection._(null, null, List.unmodifiable(notes))];
   }
 
   // With the Favorites filter there is no separate pinned section, so favorited
@@ -53,7 +51,14 @@ List<NoteSection> buildNoteSections(
 
   final nowLocal = now.toLocal();
   final todayStart = DateTime(nowLocal.year, nowLocal.month, nowLocal.day);
-  final yesterdayStart = todayStart.subtract(const Duration(days: 1));
+  // Subtracting a calendar day through the DateTime constructor (rather than
+  // Duration(days: 1)) keeps the local midnight boundary correct in zones whose
+  // DST transition happens at midnight.
+  final yesterdayStart = DateTime(
+    nowLocal.year,
+    nowLocal.month,
+    nowLocal.day - 1,
+  );
 
   for (final note in notes) {
     if (hasPinnedSection && note.favorite) {
@@ -72,18 +77,32 @@ List<NoteSection> buildNoteSections(
 
   final sections = <NoteSection>[];
   if (groupPinned.isNotEmpty) {
-    sections.add(NoteSection._(_titlePinned.$1, _titlePinned.$2, groupPinned));
+    sections.add(
+      NoteSection._(
+        _titlePinned.$1,
+        _titlePinned.$2,
+        List.unmodifiable(groupPinned),
+      ),
+    );
   }
   if (today.isNotEmpty) {
-    sections.add(NoteSection._(_titleToday.$1, _titleToday.$2, today));
+    sections.add(
+      NoteSection._(_titleToday.$1, _titleToday.$2, List.unmodifiable(today)),
+    );
   }
   if (yesterday.isNotEmpty) {
     sections.add(
-      NoteSection._(_titleYesterday.$1, _titleYesterday.$2, yesterday),
+      NoteSection._(
+        _titleYesterday.$1,
+        _titleYesterday.$2,
+        List.unmodifiable(yesterday),
+      ),
     );
   }
   if (older.isNotEmpty) {
-    sections.add(NoteSection._(_titleOlder.$1, _titleOlder.$2, older));
+    sections.add(
+      NoteSection._(_titleOlder.$1, _titleOlder.$2, List.unmodifiable(older)),
+    );
   }
   return sections;
 }
