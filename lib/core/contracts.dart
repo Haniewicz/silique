@@ -55,6 +55,13 @@ abstract interface class NoteStorage {
   /// on a new server so the whole history — not only the not-yet-acked tail —
   /// is re-uploaded.
   void markAllPending(String vaultId);
+
+  /// Re-marks every locally known image of [vaultId] as pending upload, so a
+  /// vault re-created on a fresh server (which has none of its image manifests)
+  /// re-uploads its images once more. Idempotent: the server treats a repeated
+  /// chunk/manifest PUT as a no-op, so re-uploading an already-acknowledged
+  /// image is safe.
+  void markAllImagesPending(String vaultId);
   List<Revision> pending(String vaultId);
   Json? batch(String vaultId);
   void putBatch(String vaultId, Json batch);
