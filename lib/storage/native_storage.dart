@@ -1268,6 +1268,14 @@ class NativeStorage implements NoteStorage {
   }
 
   @override
+  void markAllImagesPending(String vaultId) {
+    _requireWritable(vaultId);
+    db.execute('UPDATE image_assets SET uploaded=0 WHERE vault_id=?', [
+      vaultId,
+    ]);
+  }
+
+  @override
   Json? batch(String vaultId) {
     final rows = db.select('SELECT data FROM batches WHERE vault_id=?', [
       vaultId,
