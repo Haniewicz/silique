@@ -136,7 +136,8 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpAndSettle();
-    _expectSelectedTab(tester, 4);
+    // The shortcuts tab inserted at index 2 moved updates to index 5.
+    _expectSelectedTab(tester, 5);
     _expectUpdatesSectionVisible(tester);
     await tester.pumpWidget(const SizedBox());
   });
