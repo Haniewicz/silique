@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import '../core/fuzzy_match.dart';
 import '../core/models.dart';
 import '../l10n/app_language.dart';
+import 'menus.dart';
 import 'theme.dart';
 
 /// A floating, non-navigating quick switcher that overlays the editor.
@@ -157,6 +158,7 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
                           controller: _controller,
                           focusNode: _focus,
                           autofocus: true,
+                          contextMenuBuilder: siliqueTextContextMenu,
                           decoration: InputDecoration(
                             hintText: tr('Szukaj notatek…', 'Search notes…'),
                             prefixIcon: const Icon(Icons.search, size: 18),
