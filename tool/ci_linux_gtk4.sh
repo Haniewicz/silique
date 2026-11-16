@@ -162,7 +162,16 @@ if [[ -n "$cache" && -n "$cache_key" && "$cache_dirty" == 1 ]]; then
   echo "Saving the warm cache for $cache_key"
   rm -rf "$cache/flutter-gtk4" "$cache/fedora-unpacked"
   cp -a "$SILIQUE_GTK4_SDK" "$cache/flutter-gtk4"
-  cp -a "$work/fedora-unpacked" "$cache/fedora-unpacked"
+  # dnf and the installed-package checks leave root-owned 0600 files in the
+  # rootfs, so a plain copy fails; make them cache-readable first, and never
+  # fail an otherwise verified build just because the cache could not be saved.
+  if sudo chmod -R a+rX "$work/fedora-unpacked" &&
+      cp -a "$work/fedora-unpacked" "$cache/fedora-unpacked"; then
+    :
+  else
+    echo 'Fedora rootfs cache not saved; continuing without it.' >&2
+    rm -rf "$cache/fedora-unpacked"
+  fi
 fi
 stage complete
 printf 'Linux GTK4 engine, application, native wheel regression and installed packages verified.\n'
