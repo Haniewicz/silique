@@ -308,7 +308,7 @@ class _LocationSetupScreenState extends State<LocationSetupScreen> {
                         _error!(),
                         key: const Key('location-error'),
                         style: const TextStyle(
-                          color: Colors.orangeAccent,
+                          color: warning,
                           height: 1.6,
                         ),
                       ),

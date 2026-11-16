@@ -8,8 +8,7 @@ const line = Color(0xff2c3548),
     accent = Color(0xff8275ff);
 
 /// Sync indicator palette for the icon-only badge: green while the vault is
-/// synced or syncing, orange (cloud-off, same hue as Colors.orangeAccent)
-/// for every state without synchronization.
+/// synced or syncing, amber (cloud-off), for every state without synchronization.
 const syncOn = Color(0xff76e6b3), syncOff = Color(0xffffab40);
 
 /// Bundled monospace family (assets/fonts, OFL). The generic `'monospace'`
@@ -34,6 +33,20 @@ const badgeText = Color(0xffdbd6ff);
 // ── Status / semantic colors ────────────────────────────────────────────────
 /// Green reused by the "synced" cloud icon and success messages.
 const success = Color(0xff75e4b0);
+
+/// Amber for the single warning/conflict semantics: unsynced state, conflict
+/// copies, invalid input hints and "no matches" notes. One token so the shade
+/// cannot drift between screens (formerly spelled `Colors.orangeAccent`).
+const warning = Color(0xffffab40);
+
+/// Strongest text: dialog titles, popup-menu labels and `onSurface`.
+const textStrong = Color(0xffeeefff);
+
+/// Background of outlined text inputs.
+const inputFill = Color(0xff1c2435);
+
+/// Snackbar surface, deliberately neutral graphite.
+const snackbarBg = Color(0xff353342);
 
 /// Icon tint for the vault cloud/lock glyph in both sidebars.
 const vaultIcon = Color(0xff81e7db);
@@ -134,9 +147,9 @@ ThemeData siliqueTheme() => ThemeData(
     primary: accent,
     onPrimary: Colors.white,
     surface: panel,
-    onSurface: Color(0xffeeefff),
+    onSurface: textStrong,
     outline: line,
-    secondary: Color(0xff75e4b0),
+    secondary: success,
   ),
   textTheme: const TextTheme(
     bodyMedium: TextStyle(fontSize: 13, height: 1.5),
@@ -145,7 +158,7 @@ ThemeData siliqueTheme() => ThemeData(
   ),
   inputDecorationTheme: InputDecorationTheme(
     filled: true,
-    fillColor: const Color(0xff1c2435),
+    fillColor: inputFill,
     isDense: true,
     contentPadding: const EdgeInsets.symmetric(horizontal: 14, vertical: 14),
     border: OutlineInputBorder(
@@ -172,7 +185,7 @@ ThemeData siliqueTheme() => ThemeData(
     textStyle: const TextStyle(
       fontFamily: 'Inter',
       fontSize: 13,
-      color: Color(0xffeeefff),
+      color: textStrong,
     ),
   ),
   dropdownMenuTheme: const DropdownMenuThemeData(menuStyle: siliqueMenuStyle),
@@ -211,7 +224,7 @@ ThemeData siliqueTheme() => ThemeData(
     ),
   ),
   snackBarTheme: const SnackBarThemeData(
-    backgroundColor: Color(0xff353342),
+    backgroundColor: snackbarBg,
     contentTextStyle: TextStyle(color: Colors.white),
   ),
   dialogTheme: DialogThemeData(

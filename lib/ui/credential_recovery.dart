@@ -94,7 +94,7 @@ class _CredentialRecoveryScreenState extends State<CredentialRecoveryScreen> {
                           ),
                           key: Key('credential-recovery-error'),
                           style: TextStyle(
-                            color: Colors.orangeAccent,
+                            color: warning,
                             height: 1.5,
                           ),
                         ),

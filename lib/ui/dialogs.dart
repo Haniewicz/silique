@@ -224,7 +224,7 @@ Future<({String name, String? password})?> askVault(
                     padding: const EdgeInsets.only(top: 12),
                     child: Text(
                       error!(),
-                      style: const TextStyle(color: Colors.orangeAccent),
+                      style: const TextStyle(color: warning),
                     ),
                   ),
               ],
@@ -354,7 +354,7 @@ class _HiddenPasswordDialogState extends State<_HiddenPasswordDialog> {
                 child: Text(
                   error!(),
                   style: const TextStyle(
-                    color: Colors.orangeAccent,
+                    color: warning,
                     fontSize: 12,
                   ),
                 ),
@@ -1099,7 +1099,7 @@ class _SettingsPanelState extends State<SettingsPanel>
               'Usuwanie kopii w poprzednim magazynie nie zostało zakończone. Aktywny tryb jest pokazany powyżej. Dokończ porządkowanie przed kolejną zmianą.',
               'Removal of the copy in the previous store is incomplete. The active mode is shown above. Finish cleanup before making another change.',
             ),
-            style: TextStyle(color: Colors.orangeAccent, height: 1.5),
+            style: TextStyle(color: warning, height: 1.5),
           ),
           TextButton(
             key: const Key('credential-retry-cleanup'),
@@ -1736,7 +1736,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                           key: const Key('data-location-warning'),
                           style: const TextStyle(
                             fontSize: 11,
-                            color: Colors.orangeAccent,
+                            color: warning,
                           ),
                         ),
                       ),
@@ -1777,7 +1777,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                     SelectableText(
                       error!,
                       contextMenuBuilder: siliqueTextContextMenu,
-                      style: const TextStyle(color: Colors.orangeAccent),
+                      style: const TextStyle(color: warning),
                     ),
                   if (message != null)
                     Padding(
@@ -2365,7 +2365,7 @@ Future<String?> askFolderName(
                       child: Text(
                         error,
                         style: const TextStyle(
-                          color: Colors.orangeAccent,
+                          color: warning,
                           fontSize: 12,
                         ),
                       ),

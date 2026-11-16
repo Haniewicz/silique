@@ -209,7 +209,7 @@ Future<void> showPinMismatchDialog(
                   fontFamily: kMonoFontFamily,
                   fontFamilyFallback: ['monospace'],
                   fontSize: 14,
-                  color: Colors.orangeAccent,
+                  color: warning,
                 ),
               ),
               const SizedBox(height: 12),
@@ -242,7 +242,7 @@ Future<void> showPinMismatchDialog(
                   'Note: this weakens protection until it is confirmed again.',
                 ),
                 style: TextStyle(
-                  color: Colors.orangeAccent,
+                  color: warning,
                   fontSize: 12,
                 ),
               ),

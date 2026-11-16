@@ -109,7 +109,7 @@ class _AndroidCredentialMigrationScreenState
                                 ),
                                 key: Key('android-credential-migration-error'),
                                 style: TextStyle(
-                                  color: Colors.orangeAccent,
+                                  color: warning,
                                   height: 1.5,
                                 ),
                               ),

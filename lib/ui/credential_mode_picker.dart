@@ -30,7 +30,7 @@ class LocalCredentialWarning extends StatelessWidget {
     Localizations.localeOf(context);
     return Text(
       localCredentialWarning,
-      style: TextStyle(color: Colors.orangeAccent, height: 1.5),
+      style: TextStyle(color: warning, height: 1.5),
     );
   }
 }
