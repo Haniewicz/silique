@@ -28,6 +28,16 @@ class DeviceSettingsController extends ChangeNotifier {
   /// The current journal template id, reserved for the templates window.
   String? get journalTemplateId => _journalTemplateId;
 
+  /// Sets the default journal template to the id of a template note in the
+  /// active vault, or clears it with `null`. Persisted immediately so the
+  /// choice survives restarts exactly like a shortcut binding.
+  Future<void> setJournalTemplateId(String? id) async {
+    if (_journalTemplateId == id) return;
+    _journalTemplateId = id;
+    notifyListeners();
+    await _persist();
+  }
+
   Map<String, String> get shortcuts => Map.unmodifiable(_shortcuts);
 
   static bool get _isMac => defaultTargetPlatform == TargetPlatform.macOS;
