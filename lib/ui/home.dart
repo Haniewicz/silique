@@ -831,6 +831,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       return false;
     }
     if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    // The quick switcher is an in-tree full overlay, not a route, so
+    // `ModalRoute.isCurrent` above cannot tell it owns the keyboard. Without
+    // this guard Ctrl+W/Ctrl+N/Ctrl+Tab would act on the document underneath
+    // the overlay. The find bar deliberately stays transparent to global
+    // shortcuts (its own field swallows plain typing), matching the pre-existing
+    // behaviour of Ctrl+N/Ctrl+F while it is open.
+    if (_quickSwitcherOpen) return false;
     // One global handler drives every dynamic shortcut so each works from the
     // note list, the live editor and the source editor alike (mirroring the
     // original Ctrl/Cmd+F and Ctrl/Cmd+N design). Only Escape stays in the
@@ -877,17 +884,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   /// Whether [event] is the key-down for [action]'s currently bound chord.
   ///
-  /// Ctrl and Meta are interchangeable for the primary modifier: a chord
-  /// bound to the primary key (Cmd on macOS, Ctrl elsewhere) also fires for
-  /// the other, so a single stored preference works on either keyboard.
+  /// Modifiers are matched exactly as stored. The platform default binding is
+  /// already the primary one (Meta on macOS, Ctrl elsewhere), so a single
+  /// stored preference does not fire for both: on macOS a `meta+k` binding
+  /// ignores Ctrl+K and vice versa. That keeps system combinations such as
+  /// Cmd+Tab from reaching the tab switcher.
   bool _matches(KeyEvent event, ShortcutAction action) {
     final binding = deviceSettings.bindingOf(action);
     if (event.logicalKey != keyFor(binding.key)) return false;
     final keyboard = HardwareKeyboard.instance;
-    final wantsPrimary = binding.hasCtrl || binding.hasMeta;
-    final primaryHeld =
-        keyboard.isControlPressed || keyboard.isMetaPressed;
-    if (wantsPrimary != primaryHeld) return false;
+    if (binding.hasCtrl != keyboard.isControlPressed) return false;
+    if (binding.hasMeta != keyboard.isMetaPressed) return false;
     if (binding.hasAlt != keyboard.isAltPressed) return false;
     if (binding.hasShift != keyboard.isShiftPressed) return false;
     return true;
@@ -5446,7 +5453,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final color = noteColorValue != null
         ? Color(noteColorValue)
         : Color(repo.defaultNoteColorOf(note.vaultId));
-    const conflictColor = Colors.orangeAccent;
+    const conflictColor = warning;
     final card = Padding(
       padding: EdgeInsets.only(bottom: compact ? 0 : 2),
       child: Material(
@@ -6541,7 +6548,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     style: TextStyle(
                       fontSize: 10,
                       color: _findMatches.isEmpty && _find.text.isNotEmpty
-                          ? Colors.orangeAccent
+                          ? warning
                           : muted,
                     ),
                   ),
@@ -6608,7 +6615,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 if (_selected!.conflict)
                   Text(
                     tr('Kopia konfliktowa', 'Conflict copy'),
-                    style: TextStyle(color: Colors.orangeAccent, fontSize: 9),
+                    style: TextStyle(color: warning, fontSize: 9),
                   ),
                 // One slack absorber keeps the whole indicator cluster flush
                 // with the bottom-right corner; the inner Flexible texts

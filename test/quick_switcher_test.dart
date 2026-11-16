@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -131,5 +132,77 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
     expect(find.textContaining('zablokowan'), findsOneWidget);
+  });
+
+  testWidgets('global shortcuts defer to the open quick switcher', (
+    tester,
+  ) async {
+    final repo = await home.fixture(tester);
+    await home.mount(tester, repo, desktop: true);
+    final before = repo.notes.values.expand((notes) => notes.values).length;
+
+    _press(
+      LogicalKeyboardKey.keyK,
+      PhysicalKeyboardKey.keyK,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
+
+    // Ctrl+N and Ctrl+W would create a note / close a tab if the global handler
+    // acted on the document underneath the overlay. With the switcher open both
+    // are rejected before dispatch, and the panel keeps the keyboard.
+    final newNoteHandled = _press(
+      LogicalKeyboardKey.keyN,
+      PhysicalKeyboardKey.keyN,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
+    final closeTabHandled = _press(
+      LogicalKeyboardKey.keyW,
+      PhysicalKeyboardKey.keyW,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
+    expect(newNoteHandled, isFalse);
+    expect(closeTabHandled, isFalse);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
+    expect(
+      repo.notes.values.expand((notes) => notes.values).length,
+      before,
+      reason: 'Ctrl+N must not create a note under the quick switcher',
+    );
+  });
+
+  testWidgets('macOS binding ignores the non-primary modifier', (tester) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final repo = await home.fixture(tester);
+      await home.mount(tester, repo, desktop: true);
+
+      // The stored default on macOS is Cmd+K: Ctrl+K must not fire, so a
+      // system combination such as Cmd+Tab can never be reached by Ctrl either.
+      final ctrlHandled = _press(
+        LogicalKeyboardKey.keyK,
+        PhysicalKeyboardKey.keyK,
+        modifier: LogicalKeyboardKey.controlLeft,
+        modifierPhysical: PhysicalKeyboardKey.controlLeft,
+      );
+      await tester.pumpAndSettle();
+      expect(ctrlHandled, isFalse);
+      expect(find.byKey(const Key('quick-switcher-field')), findsNothing);
+
+      final metaHandled = _press(
+        LogicalKeyboardKey.keyK,
+        PhysicalKeyboardKey.keyK,
+        modifier: LogicalKeyboardKey.metaLeft,
+        modifierPhysical: PhysicalKeyboardKey.metaLeft,
+      );
+      await tester.pumpAndSettle();
+      expect(metaHandled, isTrue);
+      expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }
