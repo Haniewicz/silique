@@ -121,9 +121,10 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox());
 
-    // openUpdates lands on the (now index 4) updates tab.
+    // openUpdates lands on the (now index 5) updates tab, after the shortcuts
+    // tab inserted at index 2 shifted every following tab by one.
     await _mountPanel(tester, repo, openUpdates: true);
-    expect(_tabIndex(tester), 4);
+    expect(_tabIndex(tester), 5);
     await tester.pumpWidget(const SizedBox());
   });
 
