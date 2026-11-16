@@ -1218,6 +1218,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _evictEditorImages();
     _loading = true;
     _autosave?.cancel();
+    // Closing the last tab leaves no document, so the find bar must not
+    // survive with stale matches over an empty editor.
+    if (_finding) _closeFind();
     // Clear even a former ordinary note: a completed hide has already removed
     // its ordinary row, but the selected snapshot still has hidden == false.
     _editor.wipe();

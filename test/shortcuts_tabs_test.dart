@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -144,5 +145,47 @@ void main() {
     expect(_activeTitle(tester), 'Second note');
 
     await tester.runAsync(deviceSettings.resetToDefaults);
+  });
+
+  testWidgets('on macOS Ctrl+Tab switches tabs and Cmd+Tab is ignored', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final repo = await home.fixture(tester);
+      await tester.runAsync(() async {
+        final vault = repo.vaults.single.id;
+        final second = await repo.createNote(vault);
+        await repo.save(second.copyWith(title: 'Second note'));
+      });
+      await home.mount(tester, repo, desktop: true);
+      expect(_activeTitle(tester), 'Second note');
+      await tester.tap(find.text('Visible secret'));
+      await tester.pumpAndSettle();
+      expect(_activeTitle(tester), 'Visible secret');
+
+      // Cmd+Tab belongs to the OS. Round-tripping "ctrl+tab" through the store
+      // must not turn it into meta+tab.
+      final metaHandled = _press(
+        LogicalKeyboardKey.tab,
+        PhysicalKeyboardKey.tab,
+        modifier: LogicalKeyboardKey.metaLeft,
+        modifierPhysical: PhysicalKeyboardKey.metaLeft,
+      );
+      await tester.pumpAndSettle();
+      expect(metaHandled, isFalse);
+      expect(_activeTitle(tester), 'Visible secret');
+
+      final ctrlHandled = _press(
+        LogicalKeyboardKey.tab,
+        PhysicalKeyboardKey.tab,
+        modifier: LogicalKeyboardKey.controlLeft,
+      );
+      await tester.pumpAndSettle();
+      expect(ctrlHandled, isTrue);
+      expect(_activeTitle(tester), 'Second note');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
   });
 }

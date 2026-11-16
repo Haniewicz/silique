@@ -23,6 +23,14 @@ void main() {
       expect(parseShortcut('control+n', isMac: false).format(), 'ctrl+n');
     });
 
+    test('keeps an explicit ctrl literal on macOS', () {
+      // Only platform defaults pick meta on macOS; a stored "ctrl+tab" must
+      // stay Ctrl there, otherwise the tab shortcut would fall to Cmd+Tab and
+      // the OS would swallow it.
+      expect(parseShortcut('ctrl+tab', isMac: true).format(), 'ctrl+tab');
+      expect(parseShortcut('ctrl+n', isMac: true).format(), 'ctrl+n');
+    });
+
     test('is case and whitespace insensitive', () {
       expect(parseShortcut('  CTRL + S ', isMac: false).format(), 'ctrl+s');
     });

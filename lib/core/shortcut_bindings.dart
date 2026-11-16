@@ -134,14 +134,14 @@ class ShortcutBinding {
   String toString() => format();
 }
 
-/// Parses a serialized chord like `"ctrl+shift+t"`, `"meta+k"` or `"f11"` into
-/// a [ShortcutBinding], either with the default per-platform [primaryModifier]
-/// (when [isMac] is omitted it defaults to the real platform via
-/// `kIsWeb`-safe `defaultTargetPlatform`) or with the platform spelled out.
+/// Parses a serialized chord like `"ctrl+shift+t"`, `"meta+k"` or `"f11"`.
+///
+/// Modifiers are literal: `ctrl` always means Ctrl, `meta` always means Cmd on
+/// macOS. [isMac] is accepted for API symmetry with [format] and
+/// [defaultBinding]; defaults are the place that picks the platform primary.
 ///
 /// Throws [FormatException] on an unknown modifier, key name or an empty chord.
 ShortcutBinding parseShortcut(String source, {bool? isMac}) {
-  final mac = isMac ?? defaultTargetPlatform == TargetPlatform.macOS;
   final normalized = source.trim().toLowerCase();
   if (normalized.isEmpty) {
     throw const FormatException('Empty shortcut binding');
@@ -174,16 +174,9 @@ ShortcutBinding parseShortcut(String source, {bool? isMac}) {
   if (keyName.isEmpty) {
     throw FormatException('No key in "$source"');
   }
-  // Normalize the primary modifier: "ctrl" means the platform primary key on
-  // macOS, so an older payload stored as "ctrl" is read back as meta there.
-  if (mac) {
-    if (modifiers.contains(ShortcutModifier.ctrl) &&
-        !modifiers.contains(ShortcutModifier.meta)) {
-      modifiers
-        ..remove(ShortcutModifier.ctrl)
-        ..add(ShortcutModifier.meta);
-    }
-  }
+  // Modifiers are kept literally: the platform default already spells out the
+  // primary key (meta on macOS, ctrl elsewhere), so "ctrl+tab" must stay Ctrl
+  // on macOS instead of silently becoming Cmd+Tab (which the OS owns).
   final binding = normalize(modifiers, keyName);
   if (binding == null) {
     throw FormatException('Unknown key name "$keyName" in "$source"');
