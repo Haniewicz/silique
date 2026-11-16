@@ -58,6 +58,11 @@ git -C "$work/depot_tools" checkout --detach FETCH_HEAD
 export SILIQUE_DEPOT_TOOLS="$work/depot_tools"
 export DEPOT_TOOLS_UPDATE=0
 export PATH="$SILIQUE_DEPOT_TOOLS:$PATH"
+# Some engine actions call vpython3, which would bootstrap a CIPD-managed Python
+# on first use. The actions this builder triggers are plain Python 3 tools
+# (spirv-tools ggt.py), so use the documented bypass and the system python3
+# instead of downloading and initing CIPD on every cold run.
+export VPYTHON_BYPASS="manually managed python not supported by chrome operations"
 export SILIQUE_GTK4_SDK="$work/flutter-gtk4"
 if [[ -n "$cache" && -x "$cache/flutter-gtk4/bin/flutter" &&
       -f "$cache/flutter-gtk4/$engine_marker" ]] &&
