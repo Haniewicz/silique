@@ -79,9 +79,10 @@ void main() {
     addTearDown(() => tester.binding.setSurfaceSize(null));
     await _mountPanel(tester, repo);
 
-    // All five tabs render with their labels; the dialog starts on General.
+    // All six tabs render with their labels; the dialog starts on General.
     expect(find.text('Ogólne'), findsOneWidget);
     expect(find.text('Wygląd'), findsOneWidget);
+    expect(find.text('Skróty'), findsOneWidget);
     expect(find.text('Konto i synchronizacja'), findsOneWidget);
     expect(find.text('Pamięć i bezpieczeństwo'), findsOneWidget);
     expect(find.text('Aktualizacje'), findsOneWidget);
@@ -277,13 +278,13 @@ void main() {
     // so the pages are traversed by swiping the TabBarView instead of tapping
     // the tab bar. Every page must lay out without overflow.
     final pages = find.byType(TabBarView);
-    for (var i = 0; i < 4; i++) {
+    for (var i = 0; i < 5; i++) {
       await tester.fling(pages, const Offset(-400, 0), 2000);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'overflow on page $i');
     }
     final general = find.byKey(const Key('language-picker'));
-    for (var i = 0; i < 5 && general.hitTestable().evaluate().isEmpty; i++) {
+    for (var i = 0; i < 6 && general.hitTestable().evaluate().isEmpty; i++) {
       await tester.fling(pages, const Offset(400, 0), 2000);
       await tester.pumpAndSettle();
       expect(tester.takeException(), isNull, reason: 'overflow swiping back');

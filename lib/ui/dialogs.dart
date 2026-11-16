@@ -13,6 +13,8 @@ import 'updates_panel.dart';
 import 'language_picker.dart';
 import '../core/models.dart';
 import '../core/credential_mode.dart';
+import '../core/device_settings.dart';
+import '../core/shortcut_bindings.dart';
 import 'credential_mode_picker.dart';
 import '../core/server_trust.dart';
 import '../core/workspace.dart';
@@ -444,17 +446,18 @@ class _SettingsPanelState extends State<SettingsPanel>
     with SingleTickerProviderStateMixin {
   static const _generalTab = Key('settings-tab-general');
   static const _appearanceTab = Key('settings-tab-appearance');
+  static const _shortcutsTab = Key('settings-tab-shortcuts');
   static const _accountTab = Key('settings-tab-account');
   static const _storageTab = Key('settings-tab-storage');
   static const _updatesTab = Key('settings-tab-updates');
-  static const _updatesTabIndex = 4;
+  static const _updatesTabIndex = 5;
 
   final server = TextEditingController(),
       email = TextEditingController(),
       password = TextEditingController(),
       recovery = TextEditingController();
   late final TabController _tabs = TabController(
-    length: 5,
+    length: 6,
     vsync: this,
     // The update snackbar action must land on the updates tab immediately;
     // no post-frame scroll reveal is needed inside a dedicated tab.
@@ -514,6 +517,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   void initState() {
     super.initState();
     appLanguage.addListener(_languageChanged);
+    deviceSettings.addListener(_languageChanged);
     server.text = repo.session?.server ?? '';
     email.text = repo.session?.email ?? '';
     if (repo.session != null) unawaited(refreshDevices());
@@ -526,6 +530,7 @@ class _SettingsPanelState extends State<SettingsPanel>
   void dispose() {
     _pollTimer?.cancel();
     appLanguage.removeListener(_languageChanged);
+    deviceSettings.removeListener(_languageChanged);
     _tabScroll.dispose();
     _tabs.dispose();
     for (final c in [server, email, password, recovery]) {
@@ -1300,6 +1305,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                 tabs: [
                   Tab(key: _generalTab, text: tr('Ogólne', 'General')),
                   Tab(key: _appearanceTab, text: tr('Wygląd', 'Appearance')),
+                  Tab(key: _shortcutsTab, text: tr('Skróty', 'Shortcuts')),
                   Tab(
                     key: _accountTab,
                     text: tr('Konto i synchronizacja', 'Account & sync'),
@@ -1336,6 +1342,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                     _compactModeTile(),
                   ],
                 ),
+                _SettingsTabPage(children: [_shortcutsSection()]),
                 _SettingsTabPage(
                   children: [
                     Text(
@@ -1935,6 +1942,127 @@ class _SettingsPanelState extends State<SettingsPanel>
     return result ?? false;
   }
 
+  Widget _shortcutsSection() {
+    return DeviceSettingsBuilder(
+      builder: (context) => Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            tr('SKRÓTY', 'SHORTCUTS'),
+            style: TextStyle(
+              fontSize: 11,
+              letterSpacing: 1.3,
+              color: muted,
+            ),
+          ),
+          // The reset action sits on its own row so a long localized label
+          // cannot force a horizontal overflow at large text scales.
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton(
+              key: const Key('shortcuts-reset-all'),
+              onPressed: _resetShortcuts,
+              child: Text(tr('Przywróć domyślne', 'Restore defaults')),
+            ),
+          ),
+          const SizedBox(height: 4),
+          for (final action in ShortcutAction.all)
+            _shortcutTile(action),
+        ],
+      ),
+    );
+  }
+
+  Widget _shortcutTile(ShortcutAction action) {
+    final binding = deviceSettings.bindingOf(action);
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+      decoration: BoxDecoration(
+        border: Border.all(color: line),
+        borderRadius: BorderRadius.circular(9),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.max,
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  shortcutActionLabel(action),
+                  style: const TextStyle(fontSize: 14),
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  binding.label(),
+                  style: const TextStyle(color: muted, fontSize: 12),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          TextButton(
+            key: Key('shortcut-change-${action.id}'),
+            onPressed: () => _captureShortcut(action),
+            child: Text(tr('Zmień', 'Change')),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _captureShortcut(ShortcutAction action) async {
+    final captured = await showDialog<ShortcutBinding>(
+      context: context,
+      builder: (_) => const _ShortcutCaptureDialog(),
+    );
+    if (captured == null || !mounted) return;
+    // Pre-check so the error can name the conflicting action precisely.
+    final conflict = deviceSettings.conflictFor(action, captured);
+    if (conflict != null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            '${tr('Już używane przez', 'Already used by')}: '
+            '${shortcutActionLabel(conflict)}',
+          ),
+        ),
+      );
+      return;
+    }
+    try {
+      await deviceSettings.setBinding(action, captured);
+      if (mounted) setState(() {});
+    } on ArgumentError catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
+    } on FormatException catch (error) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('$error')),
+        );
+      }
+    }
+  }
+
+  Future<void> _resetShortcuts() async {
+    final confirmed = await confirmAction(
+      context,
+      () => tr('Przywrócić domyślne skróty?', 'Restore default shortcuts?'),
+      () => tr(
+        'Wszystkie skróty wrócą do wartości domyślnych.',
+        'All shortcuts will return to their defaults.',
+      ),
+    );
+    if (!confirmed || !mounted) return;
+    await deviceSettings.resetToDefaults();
+    if (mounted) setState(() {});
+  }
+
   Widget _compactModeTile() {
     final target = _compactVault;
     return SwitchListTile(
@@ -1988,6 +2116,96 @@ class _SettingsTabPageState extends State<_SettingsTabPage>
       ),
     );
   }
+}
+
+/// A modal capture dialog: the first key chord with at least one non-Shift
+/// modifier is accepted and returned; Escape cancels. A plain key without a
+/// modifier is ignored (validation demands a modifier for printable keys).
+class _ShortcutCaptureDialog extends StatefulWidget {
+  const _ShortcutCaptureDialog();
+  @override
+  State<_ShortcutCaptureDialog> createState() => _ShortcutCaptureDialogState();
+}
+
+class _ShortcutCaptureDialogState extends State<_ShortcutCaptureDialog> {
+  final FocusNode _focus = FocusNode();
+  String? _hint;
+
+  KeyEventResult _onKey(FocusNode node, KeyEvent event) {
+    if (event is KeyUpEvent) return KeyEventResult.ignored;
+    final key = event.logicalKey;
+    if (key == LogicalKeyboardKey.escape) {
+      Navigator.pop(context);
+      return KeyEventResult.handled;
+    }
+    // Reject keys that are themselves modifiers, or that produce no physical
+    // key (e.g. CapsLock, Fn).
+    if (key == LogicalKeyboardKey.controlLeft ||
+        key == LogicalKeyboardKey.controlRight ||
+        key == LogicalKeyboardKey.metaLeft ||
+        key == LogicalKeyboardKey.metaRight ||
+        key == LogicalKeyboardKey.altLeft ||
+        key == LogicalKeyboardKey.altRight ||
+        key == LogicalKeyboardKey.shiftLeft ||
+        key == LogicalKeyboardKey.shiftRight ||
+        key == LogicalKeyboardKey.capsLock ||
+        key == LogicalKeyboardKey.numLock ||
+        key == LogicalKeyboardKey.scrollLock) {
+      return KeyEventResult.handled;
+    }
+    final keyboard = HardwareKeyboard.instance;
+    final modifiers = <ShortcutModifier>{
+      if (keyboard.isControlPressed) ShortcutModifier.ctrl,
+      if (keyboard.isMetaPressed) ShortcutModifier.meta,
+      if (keyboard.isAltPressed) ShortcutModifier.alt,
+      if (keyboard.isShiftPressed) ShortcutModifier.shift,
+    };
+    // Need the key name; unknown key (e.g. media keys) is silently ignored.
+    final keyName = keyNameForLogicalKey(key);
+    if (keyName == null) return KeyEventResult.handled;
+    final hasRequiredModifier = modifiers.any(
+      (m) => m != ShortcutModifier.shift,
+    );
+    if (!hasRequiredModifier) {
+      setState(() {
+        _hint = tr(
+          'Naciśnij kombinację z modyfikatorem (Ctrl/Cmd, Alt).',
+          'Press a combination with a modifier (Ctrl/Cmd, Alt).',
+        );
+      });
+      return KeyEventResult.handled;
+    }
+    final binding = ShortcutBinding(modifiers: modifiers, key: keyName);
+    Navigator.pop(context, binding);
+    return KeyEventResult.handled;
+  }
+
+  @override
+  void dispose() {
+    _focus.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: appLanguage,
+    builder: (context, _) => AlertDialog(
+      title: Text(tr('Naciśnij skrót', 'Press a shortcut')),
+      content: Focus(
+        focusNode: _focus,
+        autofocus: true,
+        onKeyEvent: _onKey,
+        child: Text(_hint ?? tr('Naciśnij kombinację…', 'Press a combination…')),
+      ),
+      actions: [
+        TextButton(
+          key: const Key('shortcut-capture-cancel'),
+          onPressed: () => Navigator.pop(context),
+          child: Text(tr('Anuluj', 'Cancel')),
+        ),
+      ],
+    ),
+  );
 }
 
 /// Asks for a folder name relative to [parent] and returns the full path.

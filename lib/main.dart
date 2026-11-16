@@ -14,6 +14,7 @@ import 'storage/native_storage.dart';
 import 'storage/native_window.dart';
 import 'storage/secure_keys.dart';
 import 'core/credential_mode.dart';
+import 'core/device_settings.dart';
 import 'storage/credential_files.dart';
 import 'storage/credential_startup.dart';
 import 'storage/managed_keys.dart';
@@ -41,6 +42,7 @@ Future<void> main() async {
     await NativeWindow.initialize();
     support = await getApplicationSupportDirectory();
     await appLanguage.initialize(support);
+    await deviceSettings.initialize(support);
   } catch (error) {
     runApp(StartupFailureScreen(error: '$error'));
     return;

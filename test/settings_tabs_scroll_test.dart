@@ -132,7 +132,7 @@ void main() {
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump(const Duration(milliseconds: 16));
-    for (var step = 0; step < 6; step++) {
+    for (var step = 0; step < 8; step++) {
       await gesture.moveBy(const Offset(-120, 0));
       await tester.pump(const Duration(milliseconds: 16));
     }

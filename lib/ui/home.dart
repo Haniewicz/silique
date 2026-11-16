@@ -17,6 +17,8 @@ import 'package:url_launcher/url_launcher.dart';
 import '../main.dart' show notebookProvider;
 import '../core/models.dart';
 import '../core/note_sections.dart';
+import '../core/device_settings.dart';
+import '../core/shortcut_bindings.dart';
 import '../l10n/app_language.dart';
 import '../core/search.dart';
 import '../core/span_size.dart';
@@ -34,6 +36,7 @@ import '../storage/native_window.dart';
 import 'color_picker.dart';
 import 'dialogs.dart';
 import 'highlight_controller.dart';
+import 'quick_switcher.dart';
 import 'theme.dart';
 import 'menus.dart';
 import 'top_pull_dismiss.dart';
@@ -177,6 +180,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// `_tabs` ids so closing the selected tab can fall back to the last note
   /// the user actually looked at, before resorting to a positional neighbor.
   final _tabOrder = <String>[];
+  /// Note ids closed via [ShortcutAction.closeTab], oldest first. Reopening
+  /// pops the most recent id whose note still exists; cap of 20 entries.
+  final _closedTabs = <String>[];
+  /// True while the floating quick switcher overlays the editor.
+  bool _quickSwitcherOpen = false;
   final _find = TextEditingController();
   late final FocusNode _findFocus = FocusNode(onKeyEvent: _findKeyEvent);
   bool _finding = false;
@@ -612,6 +620,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _updates.prepareWindowsInstall = _prepareWindowsUpdate;
     _updates.addListener(_updateChanged);
     unawaited(_updates.initialize());
+    // Rebuild the shortcut map the moment a preference changes (settings tab).
+    deviceSettings.addListener(_shortcutsChanged);
     _title.addListener(_changed);
     _editor.addListener(_changed);
     // Focus leaving the document field must hide the floating wiki panel even
@@ -800,6 +810,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
   }
 
+  void _shortcutsChanged() {
+    if (mounted) setState(() {});
+  }
+
   bool _globalShortcuts(KeyEvent event) {
     if (_windowsUpdateBlocked) return true;
     if (event is! KeyDownEvent) return false;
@@ -815,24 +829,138 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         keyboard.isLogicalKeyPressed(LogicalKeyboardKey.altGraph)) {
       return false;
     }
-    if (event.logicalKey == LogicalKeyboardKey.keyN &&
-        (HardwareKeyboard.instance.isMetaPressed ||
-            HardwareKeyboard.instance.isControlPressed) &&
-        mounted &&
-        (ModalRoute.of(context)?.isCurrent ?? true)) {
+    if (!mounted || !(ModalRoute.of(context)?.isCurrent ?? true)) return false;
+    // One global handler drives every dynamic shortcut so each works from the
+    // note list, the live editor and the source editor alike (mirroring the
+    // original Ctrl/Cmd+F and Ctrl/Cmd+N design). Only Escape stays in the
+    // Shortcuts widget below, because it is fixed UI-state handling.
+    if (_matches(event, ShortcutAction.newNote)) {
       unawaited(_newNote());
       return true;
     }
-    if (event.logicalKey != LogicalKeyboardKey.keyF) return false;
-    if (!keyboard.isMetaPressed && !keyboard.isControlPressed) return false;
-    if (!mounted ||
-        _selected == null ||
-        !(ModalRoute.of(context)?.isCurrent ?? true)) {
-      return false;
+    if (_matches(event, ShortcutAction.findInNote)) {
+      if (_selected == null || _busy) return false;
+      _showFind();
+      return true;
     }
-    if (_busy) return false;
-    _showFind();
+    if (_matches(event, ShortcutAction.quickSwitcher)) {
+      _openQuickSwitcher();
+      return true;
+    }
+    if (_matches(event, ShortcutAction.save)) {
+      unawaited(_flush());
+      return true;
+    }
+    if (_matches(event, ShortcutAction.nextTab)) {
+      _nextTab();
+      return true;
+    }
+    if (_matches(event, ShortcutAction.closeTab)) {
+      _closeActiveTab();
+      return true;
+    }
+    if (_matches(event, ShortcutAction.reopenClosedTab)) {
+      _reopenClosedTab();
+      return true;
+    }
+    if (_matches(event, ShortcutAction.toggleSource)) {
+      if (_selected != null) _toggleSource();
+      return true;
+    }
+    if (_matches(event, ShortcutAction.toggleFocus)) {
+      _toggleFocus();
+      return true;
+    }
+    return false;
+  }
+
+  /// Whether [event] is the key-down for [action]'s currently bound chord.
+  ///
+  /// Ctrl and Meta are interchangeable for the primary modifier: a chord
+  /// bound to the primary key (Cmd on macOS, Ctrl elsewhere) also fires for
+  /// the other, so a single stored preference works on either keyboard.
+  bool _matches(KeyEvent event, ShortcutAction action) {
+    final binding = deviceSettings.bindingOf(action);
+    if (event.logicalKey != keyFor(binding.key)) return false;
+    final keyboard = HardwareKeyboard.instance;
+    final wantsPrimary = binding.hasCtrl || binding.hasMeta;
+    final primaryHeld =
+        keyboard.isControlPressed || keyboard.isMetaPressed;
+    if (wantsPrimary != primaryHeld) return false;
+    if (binding.hasAlt != keyboard.isAltPressed) return false;
+    if (binding.hasShift != keyboard.isShiftPressed) return false;
     return true;
+  }
+
+  void _openQuickSwitcher() {
+    if (repo.vaults.isEmpty || _vaultId == null) return;
+    setState(() {
+      _mobileEditor = false;
+      _quickSwitcherOpen = true;
+    });
+  }
+
+  void _closeQuickSwitcher() {
+    if (!_quickSwitcherOpen) return;
+    setState(() => _quickSwitcherOpen = false);
+  }
+
+  Widget _quickSwitcher() {
+    final vaultId = _vaultId;
+    final locked = vaultId == null || !unlocked;
+    final notes = locked
+        ? const <Note>[]
+        : (repo.notes[vaultId]?.values.toList() ?? const <Note>[]);
+    return QuickSwitcher(
+      notes: notes,
+      locked: locked,
+      onOpen: (note) => unawaited(_select(note)),
+      onClose: _closeQuickSwitcher,
+    );
+  }
+
+  void _nextTab() {
+    if (_tabs.isEmpty) return;
+    final current = _selected?.id;
+    final index = current == null ? -1 : _tabs.indexOf(current);
+    final nextIndex = _tabs.isEmpty ? 0 : (index + 1) % _tabs.length;
+    final note = _noteById(_tabs[nextIndex]);
+    if (note != null) unawaited(_select(note));
+  }
+
+  void _closeActiveTab() {
+    final current = _selected;
+    if (current == null || !_tabs.contains(current.id)) return;
+    _closedTabs.add(current.id);
+    if (_closedTabs.length > 20) {
+      _closedTabs.removeRange(0, _closedTabs.length - 20);
+    }
+    unawaited(_closeTab(current.id));
+  }
+
+  void _reopenClosedTab() {
+    while (_closedTabs.isNotEmpty) {
+      final id = _closedTabs.removeLast();
+      final note = _noteById(id);
+      if (note != null) {
+        unawaited(_select(note));
+        return;
+      }
+      // The note was deleted: skip it and try the next most recent.
+    }
+  }
+
+  void _toggleSource() {
+    setState(() {
+      _source = !_source;
+      _wikiCaret = null;
+      _wikiAnchorValue = null;
+      _scheduleWikiAnchorUpdate();
+    });
+  }
+
+  void _toggleFocus() {
+    setState(() => _focus = !_focus);
   }
 
   @override
@@ -844,6 +972,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     NativeWindow.instance.beforeClose = null;
     _updates.removeListener(_updateChanged);
     _updates.dispose();
+    deviceSettings.removeListener(_shortcutsChanged);
     _autosave?.cancel();
     unawaited(_widgetActions?.cancel());
     unawaited(_androidWidgets.dispose());
@@ -3052,43 +3181,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           },
           child: CallbackShortcuts(
             bindings: {
-              LogicalKeySet(
-                LogicalKeyboardKey.control,
-                LogicalKeyboardKey.keyF,
-              ): _showFind,
-              LogicalKeySet(LogicalKeyboardKey.meta, LogicalKeyboardKey.keyF):
-                  _showFind,
-              LogicalKeySet(
-                LogicalKeyboardKey.control,
-                LogicalKeyboardKey.keyN,
-              ): () =>
-                  _newNote(),
-              LogicalKeySet(
-                LogicalKeyboardKey.meta,
-                LogicalKeyboardKey.keyN,
-              ): () =>
-                  _newNote(),
-              LogicalKeySet(
-                LogicalKeyboardKey.control,
-                LogicalKeyboardKey.keyK,
-              ): () {
-                setState(() => _mobileEditor = false);
-                _searchFocus.requestFocus();
-              },
-              LogicalKeySet(
-                LogicalKeyboardKey.meta,
-                LogicalKeyboardKey.keyK,
-              ): () {
-                setState(() => _mobileEditor = false);
-                _searchFocus.requestFocus();
-              },
-              LogicalKeySet(
-                LogicalKeyboardKey.control,
-                LogicalKeyboardKey.keyS,
-              ): () =>
-                  _flush(),
               const SingleActivator(LogicalKeyboardKey.escape): () {
-                if (_hasSelection) {
+                if (_quickSwitcherOpen) {
+                  _closeQuickSwitcher();
+                } else if (_hasSelection) {
                   setState(_clearSelection);
                 } else if (_finding) {
                   setState(_closeFind);
@@ -3241,6 +3337,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           right: 14,
                           bottom: bottomNavVisible ? 68 : 8,
                           child: _syncBadge(small: true),
+                        ),
+                      if (_quickSwitcherOpen)
+                        Positioned.fill(
+                          child: _quickSwitcher(),
                         ),
                     ],
                   ),

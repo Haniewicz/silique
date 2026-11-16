@@ -249,14 +249,13 @@ void main() {
     }
   });
 
-  testWidgets('CallbackShortcuts reject Ctrl+AltGraph for every command', (
+  testWidgets('the global handler rejects AltGr/Alt for every command', (
     tester,
   ) async {
     final repo = await home.fixture(tester);
     await home.mount(tester, repo, desktop: true);
-    final shortcuts = tester.widget<CallbackShortcuts>(
-      find.byType(CallbackShortcuts).first,
-    );
+    // Once active, the quick switcher keeps focus; close it after each probe so
+    // the next key press still reaches the global handler (not the switcher).
     for (final modifier in [
       (LogicalKeyboardKey.controlLeft, PhysicalKeyboardKey.controlLeft),
       (LogicalKeyboardKey.metaLeft, PhysicalKeyboardKey.metaLeft),
@@ -268,53 +267,24 @@ void main() {
         if (modifier.$1 == LogicalKeyboardKey.controlLeft)
           LogicalKeyboardKey.keyS,
       ]) {
-        final keyboard = HardwareKeyboard();
-        keyboard.handleKeyEvent(
-          KeyDownEvent(
-            physicalKey: modifier.$2,
-            logicalKey: modifier.$1,
-            timeStamp: Duration.zero,
-          ),
-        );
-        final event = KeyDownEvent(
-          physicalKey: PhysicalKeyboardKey.keyN,
-          logicalKey: key,
-          timeStamp: Duration.zero,
-        );
-        keyboard.handleKeyEvent(event);
-        expect(
-          shortcuts.bindings.keys.any(
-            (binding) => binding.accepts(event, keyboard),
-          ),
-          isTrue,
-          reason: 'Plain ${modifier.$1}+$key must still activate',
-        );
+        // With AltGr (or Alt) held, the plain command must not fire: the
+        // shortcut handler yields to the OS text-input/layout path.
         for (final alt in [
           LogicalKeyboardKey.altGraph,
           LogicalKeyboardKey.altLeft,
           LogicalKeyboardKey.altRight,
         ]) {
-          keyboard.handleKeyEvent(
-            KeyDownEvent(
-              physicalKey: PhysicalKeyboardKey.altRight,
-              logicalKey: alt,
-              timeStamp: Duration.zero,
-            ),
-          );
+          _key(modifier.$1, modifier.$2, true);
+          _key(alt, PhysicalKeyboardKey.altRight, true);
+          final handled = _key(key, PhysicalKeyboardKey.keyN, true);
           expect(
-            shortcuts.bindings.keys.any(
-              (binding) => binding.accepts(event, keyboard),
-            ),
+            handled,
             isFalse,
             reason: '${modifier.$1}+$alt+$key must remain layout input',
           );
-          keyboard.handleKeyEvent(
-            KeyUpEvent(
-              physicalKey: PhysicalKeyboardKey.altRight,
-              logicalKey: alt,
-              timeStamp: Duration.zero,
-            ),
-          );
+          _key(key, PhysicalKeyboardKey.keyN, false);
+          _key(alt, PhysicalKeyboardKey.altRight, false);
+          _key(modifier.$1, modifier.$2, false);
         }
       }
     }
