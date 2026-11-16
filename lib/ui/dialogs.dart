@@ -1452,7 +1452,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                           children: [
                             const Icon(
                               Icons.cloud_done_outlined,
-                              color: Color(0xff75e4b0),
+                              color: success,
                             ),
                             const SizedBox(width: 14),
                             Expanded(
@@ -1774,7 +1774,7 @@ class _SettingsPanelState extends State<SettingsPanel>
                       padding: const EdgeInsets.only(top: 12),
                       child: Text(
                         message!(),
-                        style: const TextStyle(color: Color(0xff75e4b0)),
+                        style: const TextStyle(color: success),
                       ),
                     ),
                   if (busy)

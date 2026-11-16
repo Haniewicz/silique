@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 
 import '../l10n/app_language.dart';
+import 'theme.dart'
+    show hueRed, hueYellow, hueGreen, hueCyan, hueBlue, hueMagenta;
 
 /// Result of the visual color picker. Two terminal outcomes are kept
 /// distinguishable, mirroring the former `_FolderColorChoice` /
@@ -321,13 +323,13 @@ class _HuePainter extends CustomPainter {
           begin: Alignment.centerLeft,
           end: Alignment.centerRight,
           colors: [
-            Color(0xffff0000),
-            Color(0xffffff00),
-            Color(0xff00ff00),
-            Color(0xff00ffff),
-            Color(0xff0000ff),
-            Color(0xffff00ff),
-            Color(0xffff0000),
+            hueRed,
+            hueYellow,
+            hueGreen,
+            hueCyan,
+            hueBlue,
+            hueMagenta,
+            hueRed,
           ],
         ).createShader(rect),
     );

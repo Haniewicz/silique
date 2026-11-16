@@ -1853,8 +1853,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             start: _findMatches[i].start,
             end: _findMatches[i].end,
             backgroundColor: i == active
-                ? const Color(0x99ffb300)
-                : const Color(0x55ffd54f),
+                ? findActiveHighlight
+                : findMatchHighlight,
           ),
       ]);
       _raw?.matches = (ranges: _findMatches, active: active);
@@ -3106,7 +3106,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       padding: const EdgeInsets.only(bottom: 74),
                       child: FloatingActionButton(
                         onPressed: () => _newNote(),
-                        backgroundColor: const Color(0xff6660ff),
+                        backgroundColor: fabBg,
                         foregroundColor: Colors.white,
                         elevation: 2,
                         shape: const CircleBorder(),
@@ -3327,7 +3327,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [sidebar, Color(0xff101725)],
+          colors: [sidebar, sidebarDeep],
         ),
       ),
       child: CustomScrollView(
@@ -3433,7 +3433,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               extent: _searchFieldExtent,
               child: Container(
                 key: _searchFieldMeasureKey,
-                color: const Color(0xff101725),
+                color: sidebarDeep,
                 child: _searchField(false),
               ),
             ),
@@ -3560,7 +3560,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       vault?.protected == true
                           ? Icons.lock_outline
                           : Icons.cloud_outlined,
-                      color: const Color(0xff81e7db),
+                      color: vaultIcon,
                       size: 20,
                     ),
                     const SizedBox(width: 10),
@@ -3606,7 +3606,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       gradient: LinearGradient(
         begin: Alignment.topLeft,
         end: Alignment.bottomRight,
-        colors: [sidebar, Color(0xff101725)],
+        colors: [sidebar, sidebarDeep],
       ),
     ),
     child: Column(
@@ -3768,7 +3768,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   vault?.protected == true
                       ? Icons.lock_outline
                       : Icons.cloud_outlined,
-                  color: const Color(0xff81e7db),
+                  color: vaultIcon,
                   size: 20,
                 ),
                 const SizedBox(width: 10),
@@ -4136,7 +4136,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _newNoteButton(bool mobile) => Container(
     decoration: BoxDecoration(
       gradient: const LinearGradient(
-        colors: [Color(0xff7b6bff), Color(0xff5756f5)],
+        colors: [newNoteGradientStart, newNoteGradientEnd],
       ),
       borderRadius: BorderRadius.circular(8),
       boxShadow: [
@@ -4166,7 +4166,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           ),
           const Text(
             'Ctrl + N',
-            style: TextStyle(fontSize: 9, color: Color(0xffdbd6ff)),
+            style: TextStyle(fontSize: 9, color: badgeText),
           ),
         ],
       ),
@@ -4179,7 +4179,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       key: const Key('new-journal-entry'),
       onPressed: onTap,
       style: TextButton.styleFrom(
-        foregroundColor: const Color(0xffc2c8df),
+        foregroundColor: navForeground,
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(8),
         ),
@@ -4214,7 +4214,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         decoration: BoxDecoration(
-          color: const Color(0xff282d46),
+          color: chipBg,
           border: Border.all(color: accent.withValues(alpha: .8)),
           borderRadius: BorderRadius.circular(8),
         ),
@@ -4508,7 +4508,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ? null
                           : _folderColorOf(folderPath)) ??
                       (icon == Icons.folder_outlined
-                          ? const Color(0xff8fa6de)
+                          ? folderIcon
                           : muted),
                 ),
                 const SizedBox(width: 9),
@@ -4517,7 +4517,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     name,
                     style: TextStyle(
                       fontSize: 12,
-                      color: selected ? Colors.white : const Color(0xffc0c7df),
+                      color: selected ? Colors.white : textSecondary,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -4936,7 +4936,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                             mobile &&
                                                 _filter == 'Wszystkie' &&
                                                 f == 'Ostatnie')
-                                        ? const Color(0xff28284c)
+                                        ? filterChipSelected
                                         : Colors.transparent,
                                     border: Border.all(
                                       color:
@@ -5170,7 +5170,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 header,
                                 style: const TextStyle(
                                   fontSize: 11,
-                                  color: Color(0xffc6c2ff),
+                                  color: sectionHeader,
                                 ),
                               ),
                             ),
@@ -5209,7 +5209,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             : compact
             ? (selected ? accent.withValues(alpha: .10) : Colors.transparent)
             : selected
-            ? const Color(0xff252944)
+            ? cardSelected
             : Colors.transparent,
         borderRadius: BorderRadius.circular(compact ? 6 : 7),
         child: InkWell(
@@ -5298,7 +5298,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                             fontWeight: FontWeight.w400,
                             color: selected
                                 ? Colors.white
-                                : const Color(0xffc0c7df),
+                                : textSecondary,
                           ),
                         )
                       : Column(
@@ -5520,7 +5520,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     style: TextButton.styleFrom(
       minimumSize: const Size(0, 30),
       padding: const EdgeInsets.symmetric(horizontal: 7),
-      foregroundColor: const Color(0xffdfe3f5),
+      foregroundColor: buttonForeground,
       visualDensity: VisualDensity.compact,
     ),
     icon: Icon(icon, size: 15),
@@ -5939,7 +5939,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 fontSize: _fontSize,
                 height: 1.5,
                 leadingDistribution: TextLeadingDistribution.even,
-                color: Color(0xffcdd3e8),
+                color: textBody,
               ),
               h1Style: TextStyle(
                 fontSize: 28,
@@ -5967,7 +5967,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 fontFamily: kMonoFontFamily,
                 fontFamilyFallback: ['monospace'],
                 fontSize: 13,
-                backgroundColor: Color(0xff1f2739),
+                backgroundColor: codeBg,
               ),
               codeBlockDecoration: BoxDecoration(
                 color: panel,
@@ -6100,14 +6100,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     vertical: 3,
                   ),
                   decoration: BoxDecoration(
-                    color: const Color(0xff282d46),
+                    color: chipBg,
                     borderRadius: BorderRadius.circular(7),
                   ),
                   child: Text(
                     '#$tag',
                     style: const TextStyle(
                       fontSize: 11,
-                      color: Color(0xffc1c0ff),
+                      color: chipText,
                     ),
                   ),
                 ),
@@ -6181,7 +6181,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         gradient: LinearGradient(
           begin: Alignment.topLeft,
           end: Alignment.bottomRight,
-          colors: [Color(0xff171d2b), Color(0xff101622)],
+          colors: [editorGradientStart, editorGradientEnd],
         ),
       ),
       child: Column(
@@ -6192,7 +6192,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               height: 39,
               padding: const EdgeInsets.symmetric(horizontal: 8),
               decoration: const BoxDecoration(
-                color: Color(0xff111725),
+                color: barBg,
                 border: Border(bottom: BorderSide(color: line)),
               ),
               child: Row(
@@ -6211,7 +6211,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                                 margin: const EdgeInsets.only(right: 4, top: 4),
                                 decoration: BoxDecoration(
                                   color: id == _selected?.id
-                                      ? const Color(0xff282b47)
+                                      ? tabSelected
                                       : panel,
                                   borderRadius: const BorderRadius.vertical(
                                     top: Radius.circular(8),
@@ -6440,7 +6440,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Widget _toolbar(bool mobile) => Container(
     height: 42,
     decoration: const BoxDecoration(
-      color: Color(0xff1a2030),
+      color: toolbarBg,
       border: Border(bottom: BorderSide(color: line)),
     ),
     child: Row(
@@ -6513,7 +6513,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     style: TextButton.styleFrom(
                       minimumSize: const Size(35, 32),
                       padding: const EdgeInsets.symmetric(horizontal: 7),
-                      foregroundColor: const Color(0xffc3cae3),
+                      foregroundColor: toolbarForeground,
                     ),
                     child: Text(
                       'H$level',
@@ -6730,13 +6730,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   );
   Widget _tool(IconData icon, String hint, VoidCallback onTap) => IconButton(
     onPressed: onTap,
-    icon: Icon(icon, size: 17, color: const Color(0xffc3cae3)),
+    icon: Icon(icon, size: 17, color: toolbarForeground),
     tooltip: hint,
   );
   Widget _bottomNav() => Container(
     constraints: const BoxConstraints(minHeight: 66),
     decoration: const BoxDecoration(
-      color: Color(0xff111725),
+      color: barBg,
       border: Border(top: BorderSide(color: line)),
     ),
     child: Row(

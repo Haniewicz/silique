@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 
+import 'theme.dart' show findMatchColor, findActiveMatchColor;
+
 /// A [TextEditingController] that paints search matches behind the source text.
 ///
 /// The ranges are presentation-only: they never change the text, the undo
@@ -10,8 +12,8 @@ class HighlightingTextController extends TextEditingController {
 
   List<TextRange> _matches = const [];
   int _active = -1;
-  Color matchColor = const Color(0x66ffd54f);
-  Color activeMatchColor = const Color(0xccffb300);
+  Color matchColor = findMatchColor;
+  Color activeMatchColor = findActiveMatchColor;
 
   /// Replaces the painted matches and the highlighted active match.
   set matches(({List<TextRange> ranges, int active}) value) {
