@@ -48,6 +48,15 @@ class DeviceSettingsController extends ChangeNotifier {
     final file = File('${support.path}/device-settings.json');
     _file = file;
     try {
+      // A crash between writing the temporary file and renaming it leaves an
+      // orphan `.pending` behind; it never holds a newer state than the
+      // committed file, so a best-effort removal keeps the directory clean.
+      final orphan = File('${file.path}.pending');
+      try {
+        if (await orphan.exists()) await orphan.delete();
+      } on FileSystemException {
+        // Keep starting even when the orphan cannot be removed.
+      }
       if (await file.exists()) {
         final raw = await file.readAsString();
         final decoded = jsonDecode(raw);
