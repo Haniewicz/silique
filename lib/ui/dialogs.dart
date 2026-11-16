@@ -17,6 +17,7 @@ import '../core/device_settings.dart';
 import '../core/shortcut_bindings.dart';
 import 'credential_mode_picker.dart';
 import '../core/server_trust.dart';
+import '../core/templates.dart';
 import '../core/workspace.dart';
 import '../storage/native_storage.dart';
 import 'server_trust_dialogs.dart';
@@ -1324,7 +1325,9 @@ class _SettingsPanelState extends State<SettingsPanel>
             child: TabBarView(
               controller: _tabs,
               children: [
-                _SettingsTabPage(children: [const LanguagePicker()]),
+                _SettingsTabPage(
+                  children: [const LanguagePicker(), _journalTemplateTile()],
+                ),
                 _SettingsTabPage(
                   children: [
                     Text(
@@ -2063,6 +2066,72 @@ class _SettingsPanelState extends State<SettingsPanel>
     if (mounted) setState(() {});
   }
 
+  Widget _journalTemplateTile() {
+    final vault = widget.vault;
+    final templates = vault == null
+        ? const <Note>[]
+        : templatesOf(repo.notes[vault.id]?.values ?? const <Note>[]);
+    final currentId = deviceSettings.journalTemplateId;
+    // The stored id may point at a template that no longer exists; the picker
+    // shows „Brak" in that case rather than a phantom selection.
+    final selectedId = templates.any((t) => t.id == currentId) ? currentId : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 24),
+        Text(
+          tr('DZIENNIK', 'JOURNAL'),
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.3,
+            color: muted,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          tr('Domyślny szablon wpisu', 'Default entry template'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        SiliqueChoice<String?>(
+          key: const Key('journal-template-select'),
+          value: selectedId,
+          onChanged: vault == null ? null : (value) {
+            unawaited(deviceSettings.setJournalTemplateId(value));
+          },
+          items: [
+            SiliqueChoiceItem<String?>(
+              value: null,
+              icon: Icons.block,
+              child: Text(tr('Brak', 'None')),
+            ),
+            for (final template in templates)
+              SiliqueChoiceItem<String?>(
+                value: template.id,
+                icon: Icons.description_outlined,
+                child: Text(
+                  template.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+        ),
+        if (vault == null) ...[
+          const SizedBox(height: 6),
+          Text(
+            tr(
+              'Odblokuj vault, aby wybrać szablon.',
+              'Unlock a vault to pick a template.',
+            ),
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
+
   Widget _compactModeTile() {
     final target = _compactVault;
     return SwitchListTile(
@@ -2512,6 +2581,74 @@ Future<String?> chooseTargetFolder(
     ),
   );
   Future<void>.delayed(const Duration(seconds: 1), search.dispose);
+  return result;
+}
+
+/// Chooses a template note from [templates] and returns it, or null when the
+/// user cancels. An empty list shows the "create a note in the `Szablony`
+/// folder" hint instead of an impossible selection.
+Future<Note?> chooseTemplate(
+  BuildContext context, {
+  required List<Note> templates,
+}) async {
+  final result = await showDialog<Note>(
+    context: context,
+    builder: (ctx) => ListenableBuilder(
+      listenable: appLanguage,
+      builder: (ctx, _) => AlertDialog(
+        scrollable: true,
+        title: Text(tr('Szablon notatki', 'Note template')),
+        content: SizedBox(
+          width: 460,
+          height: 380,
+          child: templates.isEmpty
+              ? Center(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 24),
+                    child: Text(
+                      tr(
+                        'Utwórz notatkę w folderze Szablony, aby dodać szablon.',
+                        'Create a note in the Szablony folder to add a template.',
+                      ),
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(color: muted),
+                    ),
+                  ),
+                )
+              : ListView(
+                  children: [
+                    for (final template in templates)
+                      ListTile(
+                        key: Key('template-${template.id}'),
+                        minTileHeight: 48,
+                        iconColor: accent,
+                        hoverColor: menuHover,
+                        focusColor: menuHover,
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        leading: const Icon(
+                          Icons.description_outlined,
+                          size: 18,
+                        ),
+                        title: Text(
+                          template.title,
+                          style: const TextStyle(fontSize: 13),
+                        ),
+                        onTap: () => Navigator.pop(ctx, template),
+                      ),
+                  ],
+                ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr('Anuluj', 'Cancel')),
+          ),
+        ],
+      ),
+    ),
+  );
   return result;
 }
 

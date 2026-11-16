@@ -18,6 +18,7 @@ import '../main.dart' show notebookProvider;
 import '../core/models.dart';
 import '../core/note_sections.dart';
 import '../core/device_settings.dart';
+import '../core/templates.dart';
 import '../core/shortcut_bindings.dart';
 import '../l10n/app_language.dart';
 import '../core/search.dart';
@@ -1367,13 +1368,33 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       });
       return;
     }
-    final date =
-        '${today.year}-${today.month.toString().padLeft(2, '0')}-${today.day.toString().padLeft(2, '0')}';
-    final note = await repo.createNote(
+    final date = _journalDateString(today);
+    var note = await repo.createNote(
       _vaultId!,
       journalDate: journal ? date : null,
       folder: _folder ?? '',
     );
+    // A configured default journal template fills the entry silently; a missing
+    // template (deleted or renamed out of `Szablony`) degrades to the ordinary
+    // empty journal entry without an error.
+    if (journal) {
+      final defaultId = deviceSettings.journalTemplateId;
+      final template = defaultId == null
+          ? null
+          : _templates.where((t) => t.id == defaultId).firstOrNull;
+      if (template != null) {
+        final body = renderTemplate(
+          template.body,
+          now: today,
+          title: template.title,
+          vaultName: vault?.name ?? '',
+          weekday: weekdayName(today),
+        );
+        final filled = note.copyWith(title: template.title, body: body);
+        await repo.save(filled);
+        note = filled;
+      }
+    }
     if (mounted) {
       setState(() {
         _filter = journal ? 'Dziennik' : 'Wszystkie';
@@ -1390,6 +1411,90 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final created = repo.vaults.last;
     await _switch(created.id);
     if (key != null && mounted) await showRecovery(context, key, vault: true);
+  }
+
+  /// Templates available in the active vault (notes in the `Szablony` folder),
+  /// used by the "from template" menu entries and the journal default.
+  List<Note> get _templates => templatesOf(
+    _inHidden ? const <Note>[] : (repo.notes[_vaultId]?.values ?? const <Note>[]),
+  );
+
+  /// `YYYY-MM-DD` for [day] in local time, matching the deterministic journal
+  /// id derivation in [Notebook.createNote].
+  static String _journalDateString(DateTime day) =>
+      '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
+
+  /// Creates an ordinary note (or journal entry) whose title and body come
+  /// from [template]. `journal` selects the journal entry flavour (deterministic
+  /// day id + date). Callers wrap this in `_run` (or run it from a context that
+  /// already is), so it must not invoke `_run` itself.
+  Future<void> _createFromTemplate(
+    Note template, {
+    required bool journal,
+    String? folderOverride,
+  }) async {
+    await _flush();
+    final today = DateTime.now();
+    final date = _journalDateString(today);
+    if (journal && _inHidden) {
+      await _leaveHiddenFolder();
+      if (mounted) setState(() => _filter = 'Wszystkie');
+    }
+    final body = renderTemplate(
+      template.body,
+      now: today,
+      title: template.title,
+      vaultName: vault?.name ?? '',
+      weekday: weekdayName(today),
+    );
+    final note = await repo.createNote(
+      _vaultId!,
+      journalDate: journal ? date : null,
+      folder: journal
+          ? tr('Dziennik', 'Journal')
+          : (folderOverride ?? _folder ?? ''),
+    );
+    final filled = note.copyWith(title: template.title, body: body);
+    await repo.save(filled);
+    if (mounted) {
+      setState(() {
+        _filter = journal ? 'Dziennik' : 'Wszystkie';
+        _folder = null;
+        _load(filled);
+        _mobileEditor = true;
+      });
+    }
+  }
+
+  Future<void> _newNoteFromTemplate() async {
+    if (_inHidden) await _filterBy('Wszystkie');
+    if (vault == null) {
+      await _createVault();
+      return;
+    }
+    if (!unlocked) {
+      await _unlock();
+      return;
+    }
+    if (!mounted) return;
+    final template = await chooseTemplate(context, templates: _templates);
+    if (template == null || !mounted) return;
+    await _run(() => _createFromTemplate(template, journal: false));
+  }
+
+  Future<void> _newJournalFromTemplate() async {
+    if (vault == null) {
+      await _createVault();
+      return;
+    }
+    if (!unlocked) {
+      await _unlock();
+      return;
+    }
+    if (!mounted) return;
+    final template = await chooseTemplate(context, templates: _templates);
+    if (template == null || !mounted) return;
+    await _run(() => _createFromTemplate(template, journal: true));
   }
 
   Future<void> _unlock({bool recovery = false}) async {
@@ -2476,6 +2581,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     final action = await _contextMenu(point, {
       'open': () => tr('Otwórz w karcie', 'Open in a tab'),
+      'template': () => tr('Nowa notatka z szablonu…', 'New note from template…'),
       'rename': () => tr('Zmień nazwę', 'Rename'),
       'favorite': () =>
           note.favorite ? tr('Odepnij', 'Unpin') : tr('Przypnij', 'Pin'),
@@ -2491,6 +2597,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         'purge': () => tr('Usuń bezpowrotnie', 'Delete permanently'),
     });
     if (action == null || !mounted) return;
+    if (action == 'template') {
+      await _newNoteFromTemplate();
+      return;
+    }
     if (action == 'color') {
       await _pickNoteColor(note);
       return;
@@ -2580,6 +2690,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final action = await _contextMenu(point, {
       'sub': () => tr('Nowy podfolder', 'New subfolder'),
       'new': () => tr('Nowa notatka', 'New note'),
+      'template': () => tr('Nowa notatka z szablonu…', 'New note from template…'),
       'rename': () => tr('Zmień nazwę', 'Rename'),
       'move': () => tr('Przenieś folder', 'Move folder'),
       // The hidden section keeps its fixed presentation; accents are only
@@ -2596,6 +2707,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     if (action == 'color') {
       await _pickFolderColor(folder);
+      return;
+    }
+    if (action == 'template') {
+      if (vault == null) {
+        await _createVault();
+        return;
+      }
+      if (!unlocked) {
+        await _unlock();
+        return;
+      }
+      final template = await chooseTemplate(context, templates: _templates);
+      if (template == null || !mounted) return;
+      await _run(
+        () => _createFromTemplate(template, journal: false, folderOverride: folder),
+      );
       return;
     }
     await _run(() async {
@@ -3495,6 +3622,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               () => _runFromDrawer(mobile, () => _newNote(journal: true)),
             ),
           ),
+          SliverToBoxAdapter(
+            child: _nav(
+              Icons.calendar_view_day_outlined,
+              tr('Wpis dziennika z szablonu…', 'Journal entry from template…'),
+              () => _runFromDrawer(mobile, _newJournalFromTemplate),
+              navKey: const Key('new-journal-entry-template'),
+            ),
+          ),
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
           // ── Divider + folders label ──
           const SliverToBoxAdapter(child: Divider(height: 1)),
@@ -3747,6 +3882,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Icons.calendar_month_outlined,
           tr('Nowy wpis w dzienniku', 'New journal entry'),
           () => _runFromDrawer(mobile, () => _newNote(journal: true)),
+        ),
+        _nav(
+          Icons.calendar_view_day_outlined,
+          tr('Wpis dziennika z szablonu…', 'Journal entry from template…'),
+          () => _runFromDrawer(mobile, _newJournalFromTemplate),
+          navKey: const Key('new-journal-entry-template'),
         ),
         const SizedBox(height: 12),
         const Divider(height: 1),
@@ -4273,10 +4414,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ),
   );
 
-  Widget _nav(IconData icon, String label, VoidCallback onTap) => Padding(
+  Widget _nav(
+    IconData icon,
+    String label,
+    VoidCallback onTap, {
+    Key? navKey,
+  }) => Padding(
     padding: const EdgeInsets.symmetric(horizontal: 14),
     child: TextButton(
-      key: const Key('new-journal-entry'),
+      key: navKey ?? const Key('new-journal-entry'),
       onPressed: onTap,
       style: TextButton.styleFrom(
         foregroundColor: navForeground,
@@ -6705,6 +6851,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         if (v == 'delete-hidden') await _deleteHidden(_selected!);
         return;
       }
+      if (v == 'template') {
+        if (!mounted) return;
+        final template = await chooseTemplate(context, templates: _templates);
+        if (template == null || !mounted) return;
+        await _createFromTemplate(template, journal: false);
+        return;
+      }
       if (v == 'favorite') await _favorite(_selected!);
       if (v == 'purge') {
         if (!mounted) return;
@@ -6775,6 +6928,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ]
           : [
+              SiliquePopupItem(
+                value: 'template',
+                child: Text(
+                  tr(
+                    'Nowa notatka z szablonu…',
+                    'New note from template…',
+                  ),
+                ),
+              ),
               SiliquePopupItem(
                 value: 'favorite',
                 child: Text(
