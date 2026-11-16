@@ -66,6 +66,10 @@ List<NoteSection> buildNoteSections(
     }
     final updated = note.updatedAt.toLocal();
     final day = DateTime(updated.year, updated.month, updated.day);
+    // A note whose `updatedAt` lies in the future (e.g. a clock-skewed device)
+    // deliberately lands in "Dziś" rather than a future/later bucket: there is
+    // no "later than today" section, and surfacing it as recent is safer than
+    // burying it under "Starsze". Decision recorded 2026-11-16.
     if (!day.isBefore(todayStart)) {
       today.add(note);
     } else if (!day.isBefore(yesterdayStart)) {
