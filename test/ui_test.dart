@@ -124,6 +124,18 @@ void main() {
     await tester.pumpAndSettle();
   }
 
+
+  /// Scrolls the notes list until [title] is visible, then taps that row.
+  ///
+  /// Grouped section headers (Pinned/Today/…) made the list taller, so some
+  /// seeded notes now sit just below the fold at 1380x880.
+  Future<void> tapNoteRow(WidgetTester tester, String title) async {
+    await tester.ensureVisible(find.text(title, skipOffstage: false).first);
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(title).first);
+    await tester.pumpAndSettle();
+  }
+
   testWidgets(
     'desktop matches the three-pane design and searches note content',
     (tester) async {
@@ -573,8 +585,7 @@ void main() {
     (tester) async {
       final repo = (await tester.runAsync(seed))!;
       await mount(tester, repo, const Size(1380, 880));
-      await tester.tap(find.text('Mercaro – pomysły').first);
-      await tester.pumpAndSettle();
+      await tapNoteRow(tester, 'Mercaro – pomysły');
       await tester.tap(find.byTooltip('Markdown / podgląd na żywo'));
       await tester.pumpAndSettle();
       await tester.enterText(
@@ -582,13 +593,20 @@ void main() {
         'persisted across tabs',
       );
       await tester.pump(const Duration(seconds: 1));
+      await tester.ensureVisible(
+        find.text('Homelab – konfiguracja', skipOffstage: false).first,
+      );
+      await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await Future<void>.delayed(const Duration(milliseconds: 450));
         await tester.tap(find.text('Homelab – konfiguracja').first);
         await Future<void>.delayed(const Duration(milliseconds: 100));
       });
       await tester.pumpAndSettle();
-      expect(find.text('Mercaro – pomysły'), findsNWidgets(2));
+      expect(
+        find.text('Mercaro – pomysły', skipOffstage: false),
+        findsNWidgets(2),
+      );
       await tester.tap(find.text('Mercaro – pomysły').last);
       await tester.pumpAndSettle();
       expect(
@@ -763,6 +781,10 @@ void main() {
       final previews = tester.widgetList<RawImage>(find.byType(RawImage));
       expect(previews, hasLength(2));
       expect(previews.every((image) => image.image?.width == 1024), isTrue);
+      await tester.ensureVisible(
+        find.text('Mercaro – pomysły', skipOffstage: false).first,
+      );
+      await tester.pumpAndSettle();
       await tester.runAsync(() async {
         await tester.tap(find.text('Mercaro – pomysły').first);
         await Future<void>.delayed(const Duration(milliseconds: 100));
