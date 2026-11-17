@@ -48,8 +48,12 @@ def inside(executable, report, root):
             window = found.stdout.splitlines()[-1]
             command('xdotool', 'windowactivate', '--sync', window)
             time.sleep(1)
-            # Known production welcome screen on a fixed 1280x900 test display.
-            command('xdotool', 'mousemove', '--sync', '639', '617', 'click', '1')
+            # "Start locally" on the onboarding screen, measured from the widget
+            # layout at 1280x900 for both PL and EN (label centres ~653,565).
+            # The previous 639,617 predated the onboarding copy and missed the
+            # button, so the app stayed on the welcome screen and the wheel did
+            # nothing (changedPixels 0 on the first CI runs).
+            command('xdotool', 'mousemove', '--sync', '653', '565', 'click', '1')
             time.sleep(.7)
             before = report.with_name(report.stem + '-before.png')
             after = report.with_name(report.stem + '-after.png')

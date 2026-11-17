@@ -48,6 +48,21 @@ stage pointer-regression
 python3 tool/test_gtk4_pointer_position.py --report "$work/pointer-position.json"
 
 stage engine-bootstrap
+# depot_tools is not only a bootstrap dependency: `tool/build_linux_gtk4.sh`
+# runs an incremental engine ninja before packaging, and some engine actions
+# invoke vpython3 from it. Keep it on PATH for every later stage too.
+git init "$work/depot_tools"
+git -C "$work/depot_tools" remote add origin https://chromium.googlesource.com/chromium/tools/depot_tools.git
+git -C "$work/depot_tools" fetch --depth 1 origin 1eb46f8b23b4c6b3caa2be8e05999b6d1f4d0253
+git -C "$work/depot_tools" checkout --detach FETCH_HEAD
+export SILIQUE_DEPOT_TOOLS="$work/depot_tools"
+export DEPOT_TOOLS_UPDATE=0
+export PATH="$SILIQUE_DEPOT_TOOLS:$PATH"
+# The engine's ninja rules call vpython3 (and depot_tools' python3 wrapper), so
+# depot_tools must have its CIPD-managed interpreter initialised. `gclient sync`
+# does not always do that with DEPOT_TOOLS_UPDATE=0; `ensure_bootstrap` is the
+# documented way to create python3_bin_reldir.txt for this checkout.
+"$SILIQUE_DEPOT_TOOLS/ensure_bootstrap"
 export SILIQUE_GTK4_SDK="$work/flutter-gtk4"
 if [[ -n "$cache" && -x "$cache/flutter-gtk4/bin/flutter" &&
       -f "$cache/flutter-gtk4/$engine_marker" ]] &&
@@ -57,14 +72,6 @@ if [[ -n "$cache" && -x "$cache/flutter-gtk4/bin/flutter" &&
 else
   echo 'Building the patched GTK4 engine SDK (cold path).'
   cache_dirty=1
-  # depot_tools is only needed while bootstrapping the engine, so the warm path
-  # does not pay for its fetch.
-  git init "$work/depot_tools"
-  git -C "$work/depot_tools" remote add origin https://chromium.googlesource.com/chromium/tools/depot_tools.git
-  git -C "$work/depot_tools" fetch --depth 1 origin 1eb46f8b23b4c6b3caa2be8e05999b6d1f4d0253
-  git -C "$work/depot_tools" checkout --detach FETCH_HEAD
-  export SILIQUE_DEPOT_TOOLS="$work/depot_tools"
-  export DEPOT_TOOLS_UPDATE=0
   bash tool/bootstrap_linux_gtk4.sh
   [[ -z "$cache_key" ]] || printf '%s\n' "$cache_key" > "$SILIQUE_GTK4_SDK/$engine_marker"
 fi
