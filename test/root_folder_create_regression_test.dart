@@ -9,7 +9,12 @@ void main() {
     (tester) async {
       final repo = await fixture(tester);
       await mount(tester, repo, desktop: true);
-      expect(repo.allFolders(repo.vaults.single.id), isEmpty);
+      // Mounting home seeds the built-in `Szablony` folder asynchronously.
+      await drainUntil(
+        tester,
+        () => repo.allFolders(repo.vaults.single.id).contains('Szablony'),
+      );
+      expect(repo.allFolders(repo.vaults.single.id), contains('Szablony'));
 
       await tester.tap(find.byKey(const Key('new-root-folder')));
       await tester.pumpAndSettle();

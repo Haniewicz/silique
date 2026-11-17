@@ -23,6 +23,7 @@ import '../core/credential_mode.dart';
 import '../core/models.dart';
 import '../core/merge.dart';
 import '../core/workspace.dart';
+import '../core/templates.dart';
 import 'api.dart';
 
 part 'notebook_images.dart';
@@ -1302,6 +1303,32 @@ class Notebook {
     );
   });
 
+  /// Adds the default `Szablony` template folder to [vault] when it does not
+  /// exist yet, and does nothing when it already does.
+  ///
+  /// Idempotent: it writes only when [allFolders] does not already contain
+  /// [templatesFolder], which covers both a stored empty folder and a note
+  /// living directly in `Szablony`. It never touches hidden folders or
+  /// subfolders and never creates notes. The write goes through [_writeMeta]
+  /// (offline-tolerant), so for a synced vault without an owner session the
+  /// change stays pending locally and is pushed by the next sync. On a locked
+  /// vault it returns without writing; the caller re-runs it after unlocking.
+  /// Used by [ensureTemplatesFolder] and by the unlock path; callers that
+  /// already run inside an operation must use this directly, because
+  /// [serialized] would enqueue behind the operation that is awaiting it.
+  Future<void> _seedTemplatesFolder(Vault vault) async {
+    if (!unlocked.containsKey(vault.id)) return;
+    if (allFolders(vault.id).contains(templatesFolder)) return;
+    await _writeMeta(
+      vault,
+      folders: [...foldersOf(vault.id), templatesFolder],
+      offlineTolerant: true,
+    );
+  }
+
+  Future<void> ensureTemplatesFolder(Vault vault) =>
+      serialized(() => _seedTemplatesFolder(vault));
+
   /// Renames or moves a folder and every note inside its subtree.
   Future<int> renameFolder(
     Vault vault,
@@ -1318,6 +1345,20 @@ class Notebook {
     if (source == null || target == null) {
       throw FormatException(
         folderPathError(to) ?? tr('Nieprawidłowa ścieżka.', 'Invalid path.'),
+      );
+    }
+    // The built-in `Szablony` folder is system-managed: renaming or moving it
+    // (or anything nested under it) would let a user strip the template status
+    // and then delete the folder through the ordinary path. Guard before any
+    // write, exactly like `trashFolder` guards deletion.
+    final sourceLower = source.toLowerCase();
+    if (sourceLower == templatesFolder.toLowerCase() ||
+        sourceLower.startsWith('${templatesFolder.toLowerCase()}/')) {
+      throw StateError(
+        tr(
+          'Folder Szablony jest systemowy i nie można go zmienić.',
+          'The Szablony folder is built in and cannot be renamed or moved.',
+        ),
       );
     }
     if (source == target) return 0;
@@ -1375,6 +1416,14 @@ class Notebook {
     final source = normalizeFolderPath(path);
     if (source == null) {
       throw FormatException(tr('Nieprawidłowa ścieżka.', 'Invalid path.'));
+    }
+    if (source.toLowerCase() == templatesFolder.toLowerCase()) {
+      throw StateError(
+        tr(
+          'Folder Szablony jest systemowy i nie można go usunąć.',
+          'The Szablony folder is built in and cannot be deleted.',
+        ),
+      );
     }
     if (!unlocked.containsKey(vault.id)) {
       throw StateError(
@@ -1595,7 +1644,12 @@ class Notebook {
             : '',
         metadata: await crypto.seal(
           key,
-          jsonEncode({'name': name.trim()}),
+          // A new vault starts with the built-in `Szablony` folder so templates
+          // have a home from the first launch (no extra write after creation).
+          jsonEncode({
+            'name': name.trim(),
+            'folders': [templatesFolder],
+          }),
           'silique:2:vault-meta:$id',
         ),
       );
@@ -1603,6 +1657,12 @@ class Notebook {
       unlocked[id] = key;
       notes[id] = {};
       _names[id] = v.name;
+      // Mirror the sealed metadata in memory: without this the freshly created
+      // vault would look folder-less until the next unlock.
+      _meta[id] = {
+        'name': name.trim(),
+        'folders': [templatesFolder],
+      };
       return password == null ? null : base64UrlEncode(recovery);
     },
   );
@@ -1678,6 +1738,13 @@ class Notebook {
     storage.putVault(vault);
     unlocked[vault.id] = key;
     notes[vault.id] = loaded;
+    // Vaults created before the built-in folder existed get it here, on the
+    // first unlock after upgrading. Offline-tolerant, so a synced vault
+    // without a live owner session keeps the change pending for the next sync.
+    // Never fail an unlock because of a cosmetic folder.
+    try {
+      await _seedTemplatesFolder(vault);
+    } catch (_) {}
     // Finish interrupted local cleanup before exposing this vault to the UI.
     for (final id in storage.documents(_hiddenVault(vault.id)).keys) {
       await _eraseNote(vault.id, id);

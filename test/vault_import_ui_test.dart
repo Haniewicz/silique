@@ -136,7 +136,9 @@ void main() {
       await tester.tap(find.text('Anuluj'));
       await tester.pumpAndSettle();
       expect(repo.notes[repo.vaults.first.id], isEmpty);
-      expect(repo.allFolders(repo.vaults.first.id), isEmpty);
+      // The built-in `Szablony` folder is the only entry; the cancelled import
+      // must not add anything else.
+      expect(repo.allFolders(repo.vaults.first.id), {'Szablony'});
     },
   );
 
@@ -152,7 +154,7 @@ void main() {
         find.byKey(const Key('vault-import-new-folder')),
         'New/Imported',
       );
-      expect(repo.allFolders(repo.vaults.first.id), isEmpty);
+      expect(repo.allFolders(repo.vaults.first.id), {'Szablony'});
       await tester.runAsync(() async {
         await tester.tap(find.byKey(const Key('confirm-vault-import')));
         await repo.serialized(() async {});

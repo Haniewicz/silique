@@ -216,12 +216,17 @@ void main() {
         await repo.close();
 
         repo = await _notebook(dir, keys: keys);
-        expect(repo.allFolders(vault.id), {'Projekty/Mercaro', 'Projekty'});
+        expect(repo.allFolders(vault.id), {
+          'Szablony',
+          'Projekty/Mercaro',
+          'Projekty',
+        });
         expect(
           repo.notes[vault.id]!.values.any((n) => n.folder.isNotEmpty),
           false,
         );
-        expect(repo.foldersOf(vault.id), ['Projekty/Mercaro']);
+        // The built-in `Szablony` folder is seeded when the vault is created.
+        expect(repo.foldersOf(vault.id), ['Szablony', 'Projekty/Mercaro']);
         await repo.close();
         dir.deleteSync(recursive: true);
       },
@@ -245,7 +250,7 @@ void main() {
         repo.createFolder(vault, '../poza'),
         throwsA(isA<FormatException>()),
       );
-      expect(repo.allFolders(vault.id), {'Projekty'});
+      expect(repo.allFolders(vault.id), {'Projekty', 'Szablony'});
       await repo.close();
       dir.deleteSync(recursive: true);
     });
@@ -514,7 +519,7 @@ void main() {
           ),
         ) as Map<String, dynamic>;
         expect(decoded['name'], 'Prywatne');
-        expect(decoded['folders'], ['A/B']);
+        expect(decoded['folders'], ['Szablony', 'A/B']);
         await repo.close();
         dir.deleteSync(recursive: true);
       },

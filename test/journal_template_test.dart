@@ -7,9 +7,10 @@ import 'hidden_notes_home_test.dart' show drainUntil, fixture, mount;
 
 void main() {
   tearDown(() async {
-    // Reset the process-wide default so one test's choice never leaks into the
+    // Reset the process-wide defaults so one test's choice never leaks into the
     // next (the singleton never wrote to disk because it was not initialized).
     await deviceSettings.setJournalTemplateId(null);
+    await deviceSettings.setNoteTemplateId(null);
   });
 
   testWidgets('configured journal template fills a new entry silently', (
@@ -72,5 +73,46 @@ void main() {
     // The ordinary empty journal body, not the (missing) template's content.
     expect(entry!.body, isNot(contains('Szablon:')));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('configured note template fills a new ordinary note silently', (
+    tester,
+  ) async {
+    final repo = await fixture(tester);
+    final vault = repo.vaults.single;
+    final tpl = (await tester.runAsync(() async {
+      final created = await repo.createNote(vault.id, folder: 'Szablony');
+      await repo.save(
+        created.copyWith(
+          title: 'Spotkanie',
+          body: 'Szablon: {{title}} — {{vault}}',
+        ),
+      );
+      return repo.notes[vault.id]![created.id]!;
+    }))!;
+    await tester.runAsync(() => deviceSettings.setNoteTemplateId(tpl.id));
+
+    await mount(tester, repo, desktop: true);
+    await tester.tap(find.byKey(const Key('new-note-button')));
+    await tester.pumpAndSettle();
+
+    Note? note;
+    await drainUntil(tester, () {
+      final notes = repo.notes[vault.id]?.values ?? const <Note>[];
+      note = notes
+          .where((n) => n.folder == '' && n.title == 'Spotkanie')
+          .firstOrNull;
+      return note != null;
+    });
+
+    expect(note!.journalDate, isNull);
+    expect(note!.title, 'Spotkanie');
+    expect(note!.body, contains('Szablon: Spotkanie'));
+    expect(note!.body, contains('— ${vault.name}'));
+    expect(
+      note!.folder,
+      '',
+      reason: 'a filled ordinary note keeps the current folder, not Szablony',
+    );
   });
 }

@@ -72,7 +72,11 @@ void main() {
     expect(repo.folderRowsOf(vault.id), isEmpty);
     expect(repo.storage.documents('hidden:${vault.id}'), hiddenDocuments);
     await repo.unlock(vault, password: 'folder password 12345');
-    expect(repo.folderRowsOf(vault.id).map((e) => e.path), ['Beta', 'Alpha']);
+    expect(repo.folderRowsOf(vault.id).map((e) => e.path), [
+      'Beta',
+      'Alpha',
+      'Szablony',
+    ]);
     expect(repo.allFolders(vault.id), isNot(contains('HiddenOnly')));
   });
 
@@ -135,7 +139,7 @@ void main() {
     );
     expect(
       (repo as dynamic).folderRowsOf(vault.id).map((e) => e.path).toList(),
-      ['Gamma', 'Gamma/Two', 'Gamma/One', 'Alpha', 'Beta'],
+      ['Gamma', 'Gamma/Two', 'Gamma/One', 'Alpha', 'Beta', 'Szablony'],
     );
     expect(repo.storage.documents(vault.id), before);
     expect(
@@ -189,7 +193,7 @@ void main() {
     await repo.unlock(vault, password: 'folder password 12345');
     expect(
       (repo as dynamic).folderRowsOf(vault.id).map((e) => e.path).toList(),
-      ['Gamma', 'Gamma/Two', 'Gamma/One', 'Alpha', 'Beta'],
+      ['Gamma', 'Gamma/Two', 'Gamma/One', 'Alpha', 'Beta', 'Szablony'],
     );
     await expectLater(
       (repo as dynamic).reorderFolder(vault, 'Gamma/One', 'Alpha', after: true),
@@ -202,12 +206,12 @@ void main() {
     await repo.renameFolder(vault, 'Gamma', 'Renamed');
     expect(
       (repo as dynamic).folderRowsOf(vault.id).map((e) => e.path).toList(),
-      ['Renamed', 'Renamed/Two', 'Renamed/One', 'Alpha', 'Beta'],
+      ['Renamed', 'Renamed/Two', 'Renamed/One', 'Alpha', 'Beta', 'Szablony'],
     );
     await repo.trashFolder(vault, 'Renamed');
     expect(
       (repo as dynamic).folderRowsOf(vault.id).map((e) => e.path).toList(),
-      ['Alpha', 'Beta'],
+      ['Alpha', 'Beta', 'Szablony'],
     );
     expect(buildFolderTree(['Z', 'A']).map((e) => e.path), ['A', 'Z']);
   });

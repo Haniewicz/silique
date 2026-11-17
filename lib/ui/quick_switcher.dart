@@ -56,6 +56,13 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
         _highlight = 0;
       });
     });
+    // `autofocus` requests focus during mount, which loses to an existing
+    // focus (the editor or title field). Re-assert focus after the first frame
+    // so Ctrl+K reliably moves the caret into the switcher.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      _focus.requestFocus();
+    });
   }
 
   @override

@@ -216,7 +216,8 @@ void main() {
     expect(storage.documents(id), isEmpty);
     expect(storage.pending(id), isEmpty);
     expect(storage.pendingImages(id), isEmpty);
-    expect(repo.allFolders(id), isEmpty);
+    // Only the built-in `Szablony` folder exists; the aborted import added none.
+    expect(repo.allFolders(id), {'Szablony'});
     expect(repo.notes[id], isEmpty);
     expect(repo.vaults.single.metadata, metadata);
   });
@@ -246,7 +247,7 @@ void main() {
     final id = repo.vaults.single.id;
     await expectLater(repo.importVault(id, plan), throwsFormatException);
     expect(storage.documents(id), isEmpty);
-    expect(repo.allFolders(id), isEmpty);
+    expect(repo.allFolders(id), {'Szablony'});
     File('${source.path}/invalid.txt').writeAsBytesSync([255, 1, 2]);
     await expectLater(
       scanVaultImport(DirectoryImportSource(source.path)),

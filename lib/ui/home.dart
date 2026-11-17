@@ -342,17 +342,30 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       repo.allFolders(_vaultId ?? '').toList()..sort();
 
   /// Visible folder rows after applying collapsed subtrees.
-  List<FolderEntry> get _folderRows =>
-      repo.folderRowsOf(_vaultId ?? '', collapsed: _collapsedFolders);
+  List<FolderEntry> get _folderRows => _visibleFolderEntries(
+    repo.folderRowsOf(_vaultId ?? '', collapsed: _collapsedFolders),
+  );
 
   /// Folder rows for the compact tree.  Every unseen folder starts collapsed,
   /// so `_compactExpanded` tracks explicit expansions.
   List<FolderEntry> _compactFolderRows() {
     final all = repo.allFolders(_vaultId ?? '').toSet();
-    return repo.folderRowsOf(
-      _vaultId ?? '',
-      collapsed: all.difference(_compactExpanded),
+    return _visibleFolderEntries(
+      repo.folderRowsOf(
+        _vaultId ?? '',
+        collapsed: all.difference(_compactExpanded),
+      ),
     );
+  }
+
+  /// Filters the built-in `Szablony` folder out of the folder tree when the
+  /// user hid it. Only the tree row disappears: notes inside `Szablony` stay
+  /// templates and remain reachable through search and "All notes".
+  List<FolderEntry> _visibleFolderEntries(List<FolderEntry> rows) {
+    if (!deviceSettings.hideTemplatesFolder) return rows;
+    return rows
+        .where((entry) => !isSameOrDescendantPath(entry.path, templatesFolder))
+        .toList();
   }
 
   /// Whether the active vault prefers the compact sidebar presentation.
@@ -973,6 +986,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
+
     _removeWindowsUpdateBarrier(afterFrame: true);
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_globalShortcuts);
@@ -1384,26 +1398,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       journalDate: journal ? date : null,
       folder: _folder ?? '',
     );
-    // A configured default journal template fills the entry silently; a missing
+    // A configured default template fills the note silently: journal entries
+    // use `journalTemplateId`, ordinary notes `noteTemplateId`. A missing
     // template (deleted or renamed out of `Szablony`) degrades to the ordinary
-    // empty journal entry without an error.
-    if (journal) {
-      final defaultId = deviceSettings.journalTemplateId;
-      final template = defaultId == null
-          ? null
-          : _templates.where((t) => t.id == defaultId).firstOrNull;
-      if (template != null) {
-        final body = renderTemplate(
-          template.body,
-          now: today,
-          title: template.title,
-          vaultName: vault?.name ?? '',
-          weekday: weekdayName(today),
-        );
-        final filled = note.copyWith(title: template.title, body: body);
-        await repo.save(filled);
-        note = filled;
-      }
+    // empty note without an error. The note keeps its `folder`, so filling it
+    // never turns the note itself into a template.
+    final defaultId = journal
+        ? deviceSettings.journalTemplateId
+        : deviceSettings.noteTemplateId;
+    final template = defaultId == null
+        ? null
+        : _templates.where((t) => t.id == defaultId).firstOrNull;
+    if (template != null) {
+      final body = renderTemplate(
+        template.body,
+        now: today,
+        title: template.title,
+        vaultName: vault?.name ?? '',
+        weekday: weekdayName(today),
+      );
+      final filled = note.copyWith(title: template.title, body: body);
+      await repo.save(filled);
+      note = filled;
     }
     if (mounted) {
       setState(() {
@@ -1424,7 +1440,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   /// Templates available in the active vault (notes in the `Szablony` folder),
-  /// used by the "from template" menu entries and the journal default.
+  /// used to fill the configured default template or apply one to a note.
   List<Note> get _templates => templatesOf(
     _inHidden ? const <Note>[] : (repo.notes[_vaultId]?.values ?? const <Note>[]),
   );
@@ -1434,77 +1450,46 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   static String _journalDateString(DateTime day) =>
       '${day.year}-${day.month.toString().padLeft(2, '0')}-${day.day.toString().padLeft(2, '0')}';
 
-  /// Creates an ordinary note (or journal entry) whose title and body come
-  /// from [template]. `journal` selects the journal entry flavour (deterministic
-  /// day id + date). Callers wrap this in `_run` (or run it from a context that
-  /// already is), so it must not invoke `_run` itself.
-  Future<void> _createFromTemplate(
-    Note template, {
-    required bool journal,
-    String? folderOverride,
-  }) async {
-    await _flush();
-    final today = DateTime.now();
-    final date = _journalDateString(today);
-    if (journal && _inHidden) {
-      await _leaveHiddenFolder();
-      if (mounted) setState(() => _filter = 'Wszystkie');
-    }
-    final body = renderTemplate(
-      template.body,
-      now: today,
-      title: template.title,
-      vaultName: vault?.name ?? '',
-      weekday: weekdayName(today),
-    );
-    final note = await repo.createNote(
-      _vaultId!,
-      journalDate: journal ? date : null,
-      folder: journal
-          ? tr('Dziennik', 'Journal')
-          : (folderOverride ?? _folder ?? ''),
-    );
-    final filled = note.copyWith(title: template.title, body: body);
-    await repo.save(filled);
-    if (mounted) {
-      setState(() {
-        _filter = journal ? 'Dziennik' : 'Wszystkie';
-        _folder = null;
-        _load(filled);
-        _mobileEditor = true;
-      });
-    }
-  }
-
-  Future<void> _newNoteFromTemplate() async {
-    if (_inHidden) await _filterBy('Wszystkie');
-    if (vault == null) {
-      await _createVault();
-      return;
-    }
-    if (!unlocked) {
-      await _unlock();
-      return;
-    }
+  /// Renders [template] into the existing [note] and saves it.
+  ///
+  /// An empty note (whitespace-only body) is replaced by the rendered template
+  /// and, when its title is empty/"Untitled", also by the template title; a
+  /// note that already has content keeps its title and appends the rendered
+  /// body at the end, separated by a blank line. Runs outside the caller's
+  /// `_run` so the picker never shows a spinner, then wraps the write itself.
+  Future<void> _applyTemplateToNote(Note note) async {
+    if (note.hidden || note.deleted) return;
     if (!mounted) return;
     final template = await chooseTemplate(context, templates: _templates);
     if (template == null || !mounted) return;
-    await _run(() => _createFromTemplate(template, journal: false));
-  }
-
-  Future<void> _newJournalFromTemplate() async {
-    if (vault == null) {
-      await _createVault();
-      return;
-    }
-    if (!unlocked) {
-      await _unlock();
-      return;
-    }
-    if (!mounted) return;
-    final template = await chooseTemplate(context, templates: _templates);
-    if (template == null || !mounted) return;
-    await _run(() => _createFromTemplate(template, journal: true));
+    await _run(() async {
+      await _flush(); // persist any unsaved editor edits first
+      final current = repo.notes[note.vaultId]?[note.id] ?? note;
+      final now = DateTime.now();
+      final untitled =
+          current.title.trim().isEmpty ||
+          current.title == 'Bez tytułu' ||
+          current.title == 'Untitled';
+      final newTitle = untitled ? template.title : current.title;
+      final rendered = renderTemplate(
+        template.body,
+        now: now,
+        title: newTitle,
+        vaultName: vault?.name ?? '',
+        weekday: weekdayName(now),
+      );
+      final newBody = current.body.trim().isEmpty
+          ? rendered
+          : '${current.body}\n\n$rendered';
+      final changed = current.copyWith(title: newTitle, body: newBody);
+      await repo.save(changed);
+      if (mounted) {
+        setState(() {
+          if (_selected?.id == changed.id) _load(changed);
+          // Otherwise the plain setState refreshes the note card in the list.
+        });
+      }
+    });
   }
 
   Future<void> _unlock({bool recovery = false}) async {
@@ -2591,7 +2576,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     final action = await _contextMenu(point, {
       'open': () => tr('Otwórz w karcie', 'Open in a tab'),
-      'template': () => tr('Nowa notatka z szablonu…', 'New note from template…'),
+      if (!note.deleted)
+        'template': () => tr('Zastosuj szablon…', 'Apply template…'),
       'rename': () => tr('Zmień nazwę', 'Rename'),
       'favorite': () =>
           note.favorite ? tr('Odepnij', 'Unpin') : tr('Przypnij', 'Pin'),
@@ -2608,7 +2594,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     });
     if (action == null || !mounted) return;
     if (action == 'template') {
-      await _newNoteFromTemplate();
+      await _applyTemplateToNote(note);
       return;
     }
     if (action == 'color') {
@@ -2697,16 +2683,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _folderMenu(String folder, Offset? point) async {
+    final templates = isSameOrDescendantPath(folder, templatesFolder);
     final action = await _contextMenu(point, {
       'sub': () => tr('Nowy podfolder', 'New subfolder'),
       'new': () => tr('Nowa notatka', 'New note'),
-      'template': () => tr('Nowa notatka z szablonu…', 'New note from template…'),
-      'rename': () => tr('Zmień nazwę', 'Rename'),
-      'move': () => tr('Przenieś folder', 'Move folder'),
+      // The built-in `Szablony` folder (and anything nested under it) is
+      // system-managed: the UI never offers to rename or move it (the service
+      // still guards as a backstop).
+      if (!templates) 'rename': () => tr('Zmień nazwę', 'Rename'),
+      if (!templates) 'move': () => tr('Przenieś folder', 'Move folder'),
       // The hidden section keeps its fixed presentation; accents are only
       // offered for the ordinary folder tree.
       if (!_inHidden) 'color': () => tr('Kolor folderu', 'Folder color'),
-      'trash': () => tr('Przenieś folder do kosza', 'Move folder to trash'),
+      // The built-in `Szablony` folder is system-managed: the UI never offers
+      // to delete it (the service still guards as a backstop).
+      if (folder != templatesFolder)
+        'trash': () => tr('Przenieś folder do kosza', 'Move folder to trash'),
     });
     if (action == null || !mounted) return;
     if (_inHidden) await _filterBy('Wszystkie', folder: folder);
@@ -2717,22 +2709,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     if (action == 'color') {
       await _pickFolderColor(folder);
-      return;
-    }
-    if (action == 'template') {
-      if (vault == null) {
-        await _createVault();
-        return;
-      }
-      if (!unlocked) {
-        await _unlock();
-        return;
-      }
-      final template = await chooseTemplate(context, templates: _templates);
-      if (template == null || !mounted) return;
-      await _run(
-        () => _createFromTemplate(template, journal: false, folderOverride: folder),
-      );
       return;
     }
     await _run(() async {
@@ -3632,14 +3608,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               () => _runFromDrawer(mobile, () => _newNote(journal: true)),
             ),
           ),
-          SliverToBoxAdapter(
-            child: _nav(
-              Icons.calendar_view_day_outlined,
-              tr('Wpis dziennika z szablonu…', 'Journal entry from template…'),
-              () => _runFromDrawer(mobile, _newJournalFromTemplate),
-              navKey: const Key('new-journal-entry-template'),
-            ),
-          ),
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
           // ── Divider + folders label ──
           const SliverToBoxAdapter(child: Divider(height: 1)),
@@ -3892,12 +3860,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           Icons.calendar_month_outlined,
           tr('Nowy wpis w dzienniku', 'New journal entry'),
           () => _runFromDrawer(mobile, () => _newNote(journal: true)),
-        ),
-        _nav(
-          Icons.calendar_view_day_outlined,
-          tr('Wpis dziennika z szablonu…', 'Journal entry from template…'),
-          () => _runFromDrawer(mobile, _newJournalFromTemplate),
-          navKey: const Key('new-journal-entry-template'),
         ),
         const SizedBox(height: 12),
         const Divider(height: 1),
@@ -4238,7 +4200,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     final rootHasNotes = (notesByFolder[''] ?? const <Note>[]).isNotEmpty;
     var entries = searching
-        ? repo.folderRowsOf(_vaultId ?? '')
+        ? _visibleFolderEntries(repo.folderRowsOf(_vaultId ?? ''))
         : _compactFolderRows();
     if (searching) {
       entries = entries
@@ -4951,7 +4913,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     }
     final rootHasNotes = (notesByFolder[''] ?? const <Note>[]).isNotEmpty;
     var entries = searching
-        ? repo.folderRowsOf(_vaultId ?? '')
+        ? _visibleFolderEntries(repo.folderRowsOf(_vaultId ?? ''))
         : _compactFolderRows();
     if (searching) {
       entries = entries
@@ -5067,7 +5029,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // precedes. Sections come from `buildNoteSections`, which groups by date
     // only for the default sort with no query; otherwise a single flat,
     // headerless section keeps the historical ordering.
-    final rows = <(String?, String?, Note)>[
+    final rows = <(String?, String?, Note, bool)>[
       for (final section in buildNoteSections(
         list,
         sort: _sort,
@@ -5075,8 +5037,15 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         query: _query,
         now: DateTime.now(),
       ))
-        for (final note in section.notes)
-          (section.titlePl, section.titleEn, note),
+        for (var i = 0; i < section.notes.length; i++)
+          (
+            section.titlePl,
+            section.titleEn,
+            section.notes[i],
+            // Only the first row of a titled section renders its header, so a
+            // group with several notes still shows a single "Dziś"/"Starsze"….
+            i == 0 && section.hasTitle,
+          ),
     ];
     final searching = mobile && MediaQuery.viewInsetsOf(context).bottom > 0;
     return Container(
@@ -5412,10 +5381,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     itemCount: rows.length,
                     itemBuilder: (ctx, index) {
                       Localizations.localeOf(ctx);
-                      final (titlePl, titleEn, note) = rows[index];
-                      final header = titlePl != null && titleEn != null
-                          ? tr(titlePl, titleEn)
-                          : null;
+                      final (titlePl, titleEn, note, showHeader) = rows[index];
+                      final header = showHeader ? tr(titlePl!, titleEn!) : null;
                       return Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
@@ -6854,75 +6821,75 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     key: const Key('note-options'),
     tooltip: tr('Opcje notatki', 'Note options'),
     icon: const Icon(Icons.more_vert, size: 18),
-    onSelected: (v) => _run(() async {
-      if (!mounted || _selected == null) return;
-      if (_inHidden) {
-        if (v == 'reveal') await _revealHidden(_selected!);
-        if (v == 'delete-hidden') await _deleteHidden(_selected!);
-        return;
-      }
+    onSelected: (v) async {
       if (v == 'template') {
-        if (!mounted) return;
-        final template = await chooseTemplate(context, templates: _templates);
-        if (template == null || !mounted) return;
-        await _createFromTemplate(template, journal: false);
+        final note = _selected;
+        if (note != null) await _applyTemplateToNote(note);
         return;
       }
-      if (v == 'favorite') await _favorite(_selected!);
-      if (v == 'purge') {
-        if (!mounted) return;
-        final note = _selected!;
-        if (await confirmAction(
-          context,
-          () => tr('Usunąć bezpowrotnie?', 'Delete permanently?'),
-          () => tr(
-            'Notatki nie będzie można przywrócić.',
-            'The note cannot be restored.',
-          ),
-        )) {
-          await repo.purgeNote(note);
-          await _closeTab(note.id);
+      await _run(() async {
+        if (!mounted || _selected == null) return;
+        if (_inHidden) {
+          if (v == 'reveal') await _revealHidden(_selected!);
+          if (v == 'delete-hidden') await _deleteHidden(_selected!);
+          return;
         }
-      }
-      if (v == 'hide') await _hideNote(_selected!);
-      if (v == 'trash') await _trash();
-      if (v == 'export') {
-        await _flush();
-        await exportMarkdown(await repo.noteWithEmbeddedImages(_selected!));
-      }
-      if (v == 'folder') {
-        if (!mounted) return;
-        final f = await chooseTargetFolder(
-          context,
-          folders: _allFolderPaths,
-          initial: '',
-          folderColors: repo.folderColorsOf(_vaultId ?? ''),
-        );
-        if (f != null && mounted) {
+        if (v == 'favorite') await _favorite(_selected!);
+        if (v == 'purge') {
+          if (!mounted) return;
+          final note = _selected!;
+          if (await confirmAction(
+            context,
+            () => tr('Usunąć bezpowrotnie?', 'Delete permanently?'),
+            () => tr(
+              'Notatki nie będzie można przywrócić.',
+              'The note cannot be restored.',
+            ),
+          )) {
+            await repo.purgeNote(note);
+            await _closeTab(note.id);
+          }
+        }
+        if (v == 'hide') await _hideNote(_selected!);
+        if (v == 'trash') await _trash();
+        if (v == 'export') {
           await _flush();
-          final changed = _selected!.copyWith(folder: f);
-          await repo.save(changed);
-          if (mounted) setState(() => _selected = changed);
+          await exportMarkdown(await repo.noteWithEmbeddedImages(_selected!));
         }
-      }
-      if (v == 'lock') {
-        await _flush();
-        repo.lock(_vaultId!);
-        if (mounted) setState(_clearEditor);
-      }
-      if (v == 'password') {
-        if (!mounted) return;
-        final p = await askText(
-          context,
-          '',
-          titleBuilder: () => tr('Nowe hasło vaulta', 'New vault password'),
-          secret: true,
-          hintBuilder: () =>
-              tr('Co najmniej 12 znaków', 'At least 12 characters'),
-        );
-        if (p != null) await repo.changeVaultPassword(vault!, p);
-      }
-    }),
+        if (v == 'folder') {
+          if (!mounted) return;
+          final f = await chooseTargetFolder(
+            context,
+            folders: _allFolderPaths,
+            initial: '',
+            folderColors: repo.folderColorsOf(_vaultId ?? ''),
+          );
+          if (f != null && mounted) {
+            await _flush();
+            final changed = _selected!.copyWith(folder: f);
+            await repo.save(changed);
+            if (mounted) setState(() => _selected = changed);
+          }
+        }
+        if (v == 'lock') {
+          await _flush();
+          repo.lock(_vaultId!);
+          if (mounted) setState(_clearEditor);
+        }
+        if (v == 'password') {
+          if (!mounted) return;
+          final p = await askText(
+            context,
+            '',
+            titleBuilder: () => tr('Nowe hasło vaulta', 'New vault password'),
+            secret: true,
+            hintBuilder: () =>
+                tr('Co najmniej 12 znaków', 'At least 12 characters'),
+          );
+          if (p != null) await repo.changeVaultPassword(vault!, p);
+        }
+      });
+    },
     itemBuilder: (ctx) {
       Localizations.localeOf(ctx);
       return _inHidden
@@ -6938,15 +6905,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
             ]
           : [
-              SiliquePopupItem(
-                value: 'template',
-                child: Text(
-                  tr(
-                    'Nowa notatka z szablonu…',
-                    'New note from template…',
-                  ),
+              if (!_selected!.deleted)
+                SiliquePopupItem(
+                  value: 'template',
+                  child: Text(tr('Zastosuj szablon…', 'Apply template…')),
                 ),
-              ),
               SiliquePopupItem(
                 value: 'favorite',
                 child: Text(

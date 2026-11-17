@@ -52,6 +52,7 @@ Future<Notebook> seedList(WidgetTester tester) async {
 
     await addNote(title: 'Pinned note', updatedAt: now, favorite: true);
     await addNote(title: 'Today note', updatedAt: now);
+    await addNote(title: 'Today note 2', updatedAt: now);
     await addNote(
       title: 'Yesterday note',
       updatedAt: now.subtract(const Duration(days: 1)),
@@ -93,19 +94,17 @@ Future<void> mountAt(
   await tester.pumpAndSettle();
 }
 
-/// Vertical order of section headers among all header [Text]s in the list.
+/// Vertical order of section headers. Each header is expected to appear
+/// exactly once — the test body asserts `findsOneWidget` before calling this,
+/// so `getTopLeft` never sees more than one match.
 List<String> headerOrder(WidgetTester tester) {
   final headers = <String>['Przypięte', 'Dziś', 'Wczoraj', 'Starsze'];
-  final found = <String>[];
-  for (final h in headers) {
-    if (find.text(h).evaluate().isNotEmpty) found.add(h);
-  }
-  // Reorder by vertical position to prove the visual sequence.
-  final entries = found.map((h) {
-    return (h, tester.getTopLeft(find.text(h)).dy);
-  }).toList()
-    ..sort((a, b) => a.$2.compareTo(b.$2));
-  return entries.map((e) => e.$1).toList();
+  final entries = <(String, double)>[
+    for (final h in headers)
+      if (find.text(h).evaluate().isNotEmpty)
+        (h, tester.getTopLeft(find.text(h)).dy),
+  ]..sort((a, b) => a.$2.compareTo(b.$2));
+  return [for (final e in entries) e.$1];
 }
 
 void main() {
@@ -124,11 +123,19 @@ void main() {
             reason: 'each note appears exactly once in the list',
           );
         }
-        expect(
-          headerOrder(tester),
-          ['Przypięte', 'Dziś', 'Wczoraj', 'Starsze'],
-          reason: 'headers appear in the fixed section order',
-        );
+        for (final header in ['Przypięte', 'Dziś', 'Wczoraj', 'Starsze']) {
+          expect(
+            find.text(header),
+            findsOneWidget,
+            reason: 'each section header is rendered exactly once per group',
+          );
+        }
+        expect(headerOrder(tester), [
+          'Przypięte',
+          'Dziś',
+          'Wczoraj',
+          'Starsze',
+        ], reason: 'headers appear in the fixed section order');
 
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());

@@ -22,11 +22,21 @@ class DeviceSettingsController extends ChangeNotifier {
   /// `actionId -> serialized chord`, e.g. `{"newNote": "ctrl+n"}`.
   final Map<String, String> _shortcuts = {};
   String? _journalTemplateId;
+  String? _noteTemplateId;
+  bool _hideTemplatesFolder = false;
   File? _file;
   bool _initialized = false;
 
   /// The current journal template id, reserved for the templates window.
   String? get journalTemplateId => _journalTemplateId;
+
+  /// The current default template id for ordinary notes, or `null` when no
+  /// template is configured (`null` = "Brak"/"None").
+  String? get noteTemplateId => _noteTemplateId;
+
+  /// Whether the built-in `Szablony` folder is hidden from the folder tree.
+  /// The folder cannot be deleted, only hidden; default is `false` (visible).
+  bool get hideTemplatesFolder => _hideTemplatesFolder;
 
   /// Sets the default journal template to the id of a template note in the
   /// active vault, or clears it with `null`. Persisted immediately so the
@@ -34,6 +44,25 @@ class DeviceSettingsController extends ChangeNotifier {
   Future<void> setJournalTemplateId(String? id) async {
     if (_journalTemplateId == id) return;
     _journalTemplateId = id;
+    notifyListeners();
+    await _persist();
+  }
+
+  /// Sets the default template for ordinary notes to the id of a template note
+  /// in the active vault, or clears it with `null` ("Brak"/"None"). Persisted
+  /// immediately exactly like [setJournalTemplateId].
+  Future<void> setNoteTemplateId(String? id) async {
+    if (_noteTemplateId == id) return;
+    _noteTemplateId = id;
+    notifyListeners();
+    await _persist();
+  }
+
+  /// Shows or hides the built-in `Szablony` folder in the folder tree.
+  /// Persisted immediately exactly like [setJournalTemplateId].
+  Future<void> setHideTemplatesFolder(bool value) async {
+    if (_hideTemplatesFolder == value) return;
+    _hideTemplatesFolder = value;
     notifyListeners();
     await _persist();
   }
@@ -80,6 +109,12 @@ class DeviceSettingsController extends ChangeNotifier {
           }
           if (decoded['journalTemplateId'] is String) {
             _journalTemplateId = decoded['journalTemplateId'] as String;
+          }
+          if (decoded['noteTemplateId'] is String) {
+            _noteTemplateId = decoded['noteTemplateId'] as String;
+          }
+          if (decoded['hideTemplatesFolder'] is bool) {
+            _hideTemplatesFolder = decoded['hideTemplatesFolder'] as bool;
           }
         }
       }
@@ -170,6 +205,8 @@ class DeviceSettingsController extends ChangeNotifier {
       'version': deviceSettingsVersion,
       'shortcuts': Map<String, String>.from(_shortcuts),
       if (_journalTemplateId != null) 'journalTemplateId': _journalTemplateId,
+      if (_noteTemplateId != null) 'noteTemplateId': _noteTemplateId,
+      if (_hideTemplatesFolder) 'hideTemplatesFolder': true,
     };
     // Atomic write: temporary file + rename, mirroring AppLanguageController.
     return Future<void>.sync(() async {

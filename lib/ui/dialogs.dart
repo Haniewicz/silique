@@ -1326,7 +1326,12 @@ class _SettingsPanelState extends State<SettingsPanel>
               controller: _tabs,
               children: [
                 _SettingsTabPage(
-                  children: [const LanguagePicker(), _journalTemplateTile()],
+                  children: [
+                    const LanguagePicker(),
+                    _journalTemplateTile(),
+                    _noteTemplateTile(),
+                    _templatesFolderTile(),
+                  ],
                 ),
                 _SettingsTabPage(
                   children: [
@@ -2129,6 +2134,97 @@ class _SettingsPanelState extends State<SettingsPanel>
           ),
         ],
       ],
+    );
+  }
+
+  Widget _noteTemplateTile() {
+    final vault = widget.vault;
+    final templates = vault == null
+        ? const <Note>[]
+        : templatesOf(repo.notes[vault.id]?.values ?? const <Note>[]);
+    final currentId = deviceSettings.noteTemplateId;
+    // The stored id may point at a template that no longer exists; the picker
+    // shows „Brak" in that case rather than a phantom selection.
+    final selectedId = templates.any((t) => t.id == currentId) ? currentId : null;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const SizedBox(height: 24),
+        Text(
+          tr('NOTATKI', 'NOTES'),
+          style: TextStyle(
+            fontSize: 11,
+            letterSpacing: 1.3,
+            color: muted,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          tr('Domyślny szablon notatki', 'Default note template'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        const SizedBox(height: 8),
+        SiliqueChoice<String?>(
+          key: const Key('note-template-select'),
+          value: selectedId,
+          onChanged: vault == null ? null : (value) {
+            unawaited(deviceSettings.setNoteTemplateId(value));
+          },
+          items: [
+            SiliqueChoiceItem<String?>(
+              value: null,
+              icon: Icons.block,
+              child: Text(tr('Brak', 'None')),
+            ),
+            for (final template in templates)
+              SiliqueChoiceItem<String?>(
+                value: template.id,
+                icon: Icons.description_outlined,
+                child: Text(
+                  template.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+          ],
+        ),
+        if (vault == null) ...[
+          const SizedBox(height: 6),
+          Text(
+            tr(
+              'Odblokuj vault, aby wybrać szablon.',
+              'Unlock a vault to pick a template.',
+            ),
+            style: const TextStyle(color: muted, fontSize: 12),
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _templatesFolderTile() {
+    return SwitchListTile(
+      key: const Key('templates-folder-hidden-toggle'),
+      contentPadding: EdgeInsets.zero,
+      value: deviceSettings.hideTemplatesFolder,
+      onChanged: (value) {
+        unawaited(deviceSettings.setHideTemplatesFolder(value));
+      },
+      title: Text(
+        tr('Ukryj folder Szablony', 'Hide the Szablony folder'),
+        style: const TextStyle(fontSize: 14),
+      ),
+      subtitle: Padding(
+        padding: const EdgeInsets.only(top: 4),
+        child: Text(
+          tr(
+            'Folder Szablony jest wbudowany — można go ukryć w drzewie, ale nie usunąć.',
+            'The Szablony folder is built in — you can hide it from the tree, but not delete it.',
+          ),
+          style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
+        ),
+      ),
     );
   }
 

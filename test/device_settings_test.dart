@@ -43,11 +43,15 @@ void main() {
       var c = await fresh();
       await c.setBinding(
         ShortcutAction.save,
-        ShortcutBinding(modifiers: {ShortcutModifier.ctrl, ShortcutModifier.shift}, key: 's'),
+        ShortcutBinding(
+          modifiers: {ShortcutModifier.ctrl, ShortcutModifier.shift},
+          key: 's',
+        ),
       );
       final file = File('${dir.path}/device-settings.json');
       expect(file.existsSync(), isTrue);
-      final decoded = jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      final decoded =
+          jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
       expect(decoded['version'], 1);
       expect(
         (decoded['shortcuts'] as Map<String, dynamic>)['save'],
@@ -70,7 +74,10 @@ void main() {
       final c = await fresh();
       await c.setBinding(
         ShortcutAction.save,
-        ShortcutBinding(modifiers: {ShortcutModifier.ctrl, ShortcutModifier.shift}, key: 's'),
+        ShortcutBinding(
+          modifiers: {ShortcutModifier.ctrl, ShortcutModifier.shift},
+          key: 's',
+        ),
       );
       await c.resetToDefaults();
       expect(c.bindingOf(ShortcutAction.save).format(), 'ctrl+s');
@@ -150,6 +157,100 @@ void main() {
       );
       final c = await fresh();
       expect(c.journalTemplateId, 'tpl-42');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  test(
+    'noteTemplateId defaults to null and persists through the setter',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      try {
+        var c = await fresh();
+        expect(c.noteTemplateId, isNull);
+
+        await c.setNoteTemplateId('tpl-note-1');
+        final file = File('${dir.path}/device-settings.json');
+        final decoded =
+            jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+        expect(decoded['noteTemplateId'], 'tpl-note-1');
+
+        // A fresh controller over the same directory reads it back.
+        c = await fresh();
+        expect(c.noteTemplateId, 'tpl-note-1');
+
+        await c.setNoteTemplateId(null);
+        final cleared =
+            jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+        expect(cleared.containsKey('noteTemplateId'), isFalse);
+        final c2 = await fresh();
+        expect(c2.noteTemplateId, isNull);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  test('noteTemplateId is read back from the file', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      final file = File('${dir.path}/device-settings.json');
+      file.writeAsStringSync(
+        jsonEncode({
+          'version': 1,
+          'shortcuts': <String, String>{},
+          'noteTemplateId': 'tpl-note-7',
+        }),
+      );
+      final c = await fresh();
+      expect(c.noteTemplateId, 'tpl-note-7');
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  test('hideTemplatesFolder defaults to false and persists', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      var c = await fresh();
+      expect(c.hideTemplatesFolder, isFalse);
+
+      await c.setHideTemplatesFolder(true);
+      final file = File('${dir.path}/device-settings.json');
+      final decoded =
+          jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      expect(decoded['hideTemplatesFolder'], true);
+
+      c = await fresh();
+      expect(c.hideTemplatesFolder, isTrue);
+
+      await c.setHideTemplatesFolder(false);
+      final cleared =
+          jsonDecode(file.readAsStringSync()) as Map<String, dynamic>;
+      expect(cleared.containsKey('hideTemplatesFolder'), isFalse);
+      final c2 = await fresh();
+      expect(c2.hideTemplatesFolder, isFalse);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
+
+  test('missing new keys fall back to defaults without throwing', () async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+    try {
+      final file = File('${dir.path}/device-settings.json');
+      file.writeAsStringSync(
+        jsonEncode({
+          'version': 1,
+          'shortcuts': <String, String>{},
+          'journalTemplateId': 'tpl-42',
+        }),
+      );
+      final c = await fresh();
+      expect(c.journalTemplateId, 'tpl-42');
+      expect(c.noteTemplateId, isNull);
+      expect(c.hideTemplatesFolder, isFalse);
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }

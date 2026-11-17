@@ -19,9 +19,8 @@ Future<void> openPicker(
       home: Scaffold(
         body: Builder(
           builder: (context) => TextButton(
-            onPressed: () async => onResult(
-              await chooseTemplate(context, templates: templates),
-            ),
+            onPressed: () async =>
+                onResult(await chooseTemplate(context, templates: templates)),
             child: const Text('Open picker'),
           ),
         ),
@@ -76,24 +75,22 @@ void main() {
     expect(result, isNull);
   });
 
-  testWidgets('note options menu creates a note with rendered placeholders', (
+  testWidgets('note options menu no longer offers creating from a template', (
     tester,
   ) async {
     final repo = await fixture(tester);
     final vault = repo.vaults.single;
-    // A template note in the `Szablony` folder.
-    final tpl = (await tester.runAsync(
-      () async {
-        final created = await repo.createNote(vault.id, folder: 'Szablony');
-        await repo.save(
-          created.copyWith(
-            title: 'Spotkanie',
-            body: 'Tytuł: {{title}} — vault: {{vault}} — stały tekst',
-          ),
-        );
-        return repo.notes[vault.id]![created.id]!;
-      },
-    ))!;
+    // A template note in the `Szablony` folder, still picked up by `templatesOf`
+    // for the "Apply template…" flow.
+    await tester.runAsync(() async {
+      final created = await repo.createNote(vault.id, folder: 'Szablony');
+      await repo.save(
+        created.copyWith(
+          title: 'Spotkanie',
+          body: 'Tytuł: {{title}} — vault: {{vault}} — stały tekst',
+        ),
+      );
+    });
     // An ordinary note to open so the toolbar note-options menu is available.
     final ordinary = repo.notes[vault.id]!.values.firstWhere(
       (n) => n.folder != 'Szablony',
@@ -106,35 +103,65 @@ void main() {
     await tester.ensureVisible(find.byKey(const Key('note-options')));
     await tester.tap(find.byKey(const Key('note-options')));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Nowa notatka z szablonu…'));
+
+    // Creating a note from a template was removed in 0.2.59 and replaced by
+    // "Apply template…" on an existing note (covered by apply_template_test.dart
+    // and the note-options test below), so this only asserts the old entry is
+    // gone, not that the menu is template-free.
+    expect(find.text('Nowa notatka z szablonu…'), findsNothing);
+  });
+
+  testWidgets('note options applies a template to the open note', (
+    tester,
+  ) async {
+    final repo = await fixture(tester);
+    final vault = repo.vaults.single;
+    late final String templateId;
+    await tester.runAsync(() async {
+      final created = await repo.createNote(vault.id, folder: 'Szablony');
+      templateId = created.id;
+      await repo.save(
+        created.copyWith(
+          title: 'Spotkanie',
+          body: 'Szablon {{title}} — {{vault}}',
+        ),
+      );
+    });
+    // The ordinary note seeded by `fixture` (title "Visible secret", non-empty
+    // body), to open so the toolbar note-options menu is available.
+    final ordinary = repo.notes[vault.id]!.values.firstWhere(
+      (n) => n.folder != 'Szablony',
+    );
+    final noteCountBefore = repo.notes[vault.id]!.length;
+
+    await mount(tester, repo, desktop: true);
+    // Drain the fire-and-forget `ensureTemplatesFolder` started by `initState`
+    // before touching the repository in real async below.
+    await drainUntil(
+      tester,
+      () => repo.allFolders(vault.id).contains('Szablony'),
+    );
+
+    await tester.tap(find.byKey(Key('note-card-${ordinary.id}')));
     await tester.pumpAndSettle();
 
-    // The picker dialog lists the template; select it.
-    expect(
-      find.byKey(Key('template-${tpl.id}')),
-      findsOneWidget,
-      reason: 'template picker should be open with the template listed',
-    );
-    await tester.tap(find.byKey(Key('template-${tpl.id}')));
-    // The note is created asynchronously; poll until it materialises instead of
-    // relying on `pumpAndSettle`, which can race the busy flag and spinner.
-    Note? created;
+    await tester.ensureVisible(find.byKey(const Key('note-options')));
+    await tester.tap(find.byKey(const Key('note-options')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Zastosuj szablon…'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(Key('template-$templateId')));
+    await tester.pumpAndSettle();
+
     await drainUntil(tester, () {
-      final notes = repo.notes[vault.id]?.values ?? const <Note>[];
-      created = notes
-          .where(
-            (n) =>
-                n.id != tpl.id &&
-                n.id != ordinary.id &&
-                n.title == 'Spotkanie',
-          )
-          .firstOrNull;
-      return created != null;
+      final n = repo.notes[vault.id]![ordinary.id]!;
+      return n.body.contains('Szablon');
     });
 
-    expect(created!.title, 'Spotkanie');
-    expect(created!.body, contains('Tytuł: Spotkanie'));
-    expect(created!.body, contains('vault: ${vault.name}'));
-    expect(created!.body, contains('stały tekst'));
+    final updated = repo.notes[vault.id]![ordinary.id]!;
+    // The open note received the rendered template content…
+    expect(updated.body, contains('Szablon ${ordinary.title}'));
+    // …and no extra note was created.
+    expect(repo.notes[vault.id]!.length, noteCountBefore);
   });
 }

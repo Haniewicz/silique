@@ -71,6 +71,39 @@ void main() {
     expect(switcherField.focusNode?.hasFocus ?? false, isTrue);
   });
 
+  testWidgets('opening the switcher steals focus from the editor', (
+    tester,
+  ) async {
+    final repo = await home.fixture(tester);
+    await home.mount(tester, repo, desktop: true);
+
+    // Open the seeded note so its title field exists and owns keyboard focus,
+    // mirroring real use where the editor/title holds focus before Ctrl+K.
+    final noteId = repo.notes[repo.vaults.single.id]!.values.single.id;
+    await tester.tap(find.byKey(Key('note-card-$noteId')));
+    await tester.pumpAndSettle();
+    final titleField = tester.widget<TextField>(
+      find.byKey(const Key('note-title')),
+    );
+    titleField.focusNode!.requestFocus();
+    await tester.pumpAndSettle();
+    expect(titleField.focusNode!.hasFocus, isTrue);
+
+    _press(LogicalKeyboardKey.keyK, PhysicalKeyboardKey.keyK, modifier: LogicalKeyboardKey.controlLeft);
+    await tester.pumpAndSettle();
+
+    expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
+    final switcherField = tester.widget<TextField>(
+      find.byKey(const Key('quick-switcher-field')),
+    );
+    expect(switcherField.focusNode?.hasFocus ?? false, isTrue);
+    expect(
+      titleField.focusNode!.hasFocus,
+      isFalse,
+      reason: 'the title field must lose focus to the quick switcher',
+    );
+  });
+
   testWidgets('typing filters; Enter opens the matching note; Esc closes', (
     tester,
   ) async {
