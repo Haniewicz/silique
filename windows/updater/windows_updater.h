@@ -46,6 +46,10 @@ class WindowsUpdater {
       int build, const std::string& hash, int64_t size);
   // Test transport is never exposed through the Flutter method channel.
   void SetLaunchForTest(std::function<BOOL(SHELLEXECUTEINFOW*)> launch) { launch_ = std::move(launch); }
+  // Test-only: the acceptance/native harness replaces `{app}\silique.exe` with a
+  // test binary, so an in-app relaunch there would start a test suite instead of
+  // a notebook. Production never disables it.
+  void SetRelaunchAfterInstallForTest(bool enabled) { relaunch_after_install_ = enabled; }
   // Deterministic race probe at the executable guard-copy boundary.
   void SetBeforeGuardStartForTest(std::function<void()> callback) { before_guard_start_ = std::move(callback); }
  private:
@@ -53,6 +57,7 @@ class WindowsUpdater {
   int build_;
   std::function<BOOL(SHELLEXECUTEINFOW*)> launch_ = ShellExecuteExW;
   std::function<void()> before_guard_start_;
+  bool relaunch_after_install_ = true;
   std::wstring directory_;
 };
 }  // namespace silique

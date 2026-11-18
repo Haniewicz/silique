@@ -313,6 +313,9 @@ int wmain(int argc, wchar_t** argv) {
       if (ok) { CloseHandle(child.hThread); CloseHandle(child.hProcess); request->hProcess = nullptr; }
       return ok; // prove NULL/bootstrap hProcess never means failed after launch
     });
+    // The acceptance fixture's "{app}\silique.exe" is this test binary; a real
+    // relaunch would run a test suite instead of a notebook.
+    updater.SetRelaunchAfterInstallForTest(false);
     assert(updater.install(nullptr, path, version, build + 1, hash, size) == "launched");
     const int utf8_size = WideCharToMultiByte(CP_UTF8, WC_ERR_INVALID_CHARS,
         path.data(), static_cast<int>(path.size()), nullptr, 0, nullptr, nullptr);

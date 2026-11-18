@@ -99,6 +99,12 @@ preferable). This is not an unsaved-data handoff for arbitrary historical apps.
 
 ## Tests and evidence
 
+The disposable acceptance runner replaces `{app}\silique.exe` with the native
+test binary, so the handoff fixture explicitly disables relaunch
+(`SetRelaunchAfterInstallForTest(false)`): otherwise the guard would start a
+test suite instead of a notebook, which also locks the fixture files before the
+uninstall step. Production code never disables it.
+
 The silent flags, the `--relaunch` handoff and the handle-release ordering are
 covered by the native updater tests (Setup argument assertions, guard argument
 parsing) and by the Dart update-flow tests; the real UAC consent, silent Setup

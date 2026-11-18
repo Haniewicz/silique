@@ -419,7 +419,7 @@ std::string WindowsUpdater::install(HWND window, const std::wstring& path, const
   // after Inno exits successfully, and never with an elevated token: the guard
   // is asInvoker and CreateProcess inherits the standard user's token.
   auto held = StartWindowsUpdateGuard(guard, *locks, GetCurrentProcess(),
-      install_dir + L"\\silique.exe");
+      relaunch_after_install_ ? install_dir + L"\\silique.exe" : std::wstring());
   if (!held) return "failed"; // no Setup has been started on any failure above
   // In-app update runs without the interactive wizard: /SILENT keeps only the
   // (non-interactive) progress view, /SUPPRESSMSGBOXES drops message boxes.
