@@ -36,6 +36,7 @@ import '../storage/native_image_clipboard.dart';
 import '../storage/native_storage.dart';
 import '../storage/native_window.dart';
 import 'color_picker.dart';
+import 'footer_floating_label.dart';
 import 'dialogs.dart';
 import 'highlight_controller.dart';
 import 'quick_switcher.dart';
@@ -156,7 +157,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   Note? _noteById(String? id) => _inHidden
       ? (_hiddenAvailable ? _hiddenNotes[id] : null)
       : repo.notes[_vaultId]?[id];
-  late final _updates = widget.updater ??
+  late final _updates =
+      widget.updater ??
       AppUpdater(
         restartAfterInstall: Platform.isLinux ? NativeWindow.restart : null,
       );
@@ -178,13 +180,16 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       _dirty = false,
       _notesCollapsed = false;
   final _tabs = <String>[];
+
   /// Most-recently-used order of opened tabs (front = most recent). Mirrors
   /// `_tabs` ids so closing the selected tab can fall back to the last note
   /// the user actually looked at, before resorting to a positional neighbor.
   final _tabOrder = <String>[];
+
   /// Note ids closed via [ShortcutAction.closeTab], oldest first. Reopening
   /// pops the most recent id whose note still exists; cap of 20 entries.
   final _closedTabs = <String>[];
+
   /// True while the floating quick switcher overlays the editor.
   bool _quickSwitcherOpen = false;
   final _find = TextEditingController();
@@ -200,6 +205,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Stable note IDs selected in the active, unlocked vault.
   final Set<String> _selection = {};
   String? _selectionAnchor;
+
   /// How long a press must last before a sidebar row becomes a drag on
   /// desktop. Non-zero so a hand-jittered click still reaches the row's tap
   /// handler; short enough to stay invisible during a deliberate drag.
@@ -985,7 +991,6 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   void dispose() {
-
     _removeWindowsUpdateBarrier(afterFrame: true);
     WidgetsBinding.instance.removeObserver(this);
     HardwareKeyboard.instance.removeHandler(_globalShortcuts);
@@ -1441,7 +1446,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// Templates available in the active vault (notes in the `Szablony` folder),
   /// used to fill the configured default template or apply one to a note.
   List<Note> get _templates => templatesOf(
-    _inHidden ? const <Note>[] : (repo.notes[_vaultId]?.values ?? const <Note>[]),
+    _inHidden
+        ? const <Note>[]
+        : (repo.notes[_vaultId]?.values ?? const <Note>[]),
   );
 
   /// `YYYY-MM-DD` for [day] in local time, matching the deterministic journal
@@ -2935,8 +2942,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       final password = await askText(
         context,
         '',
-        titleBuilder: () =>
-            tr('Odblokuj vault przed eksportem', 'Unlock the vault before exporting'),
+        titleBuilder: () => tr(
+          'Odblokuj vault przed eksportem',
+          'Unlock the vault before exporting',
+        ),
         secret: true,
         hintBuilder: () => tr('Hasło vaulta', 'Vault password'),
       );
@@ -2960,12 +2969,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     if (current == null) return;
     final result = await showVaultExportDialog(context, repo, current);
     if (result != null) {
-      _notify(
-        tr(
-          'Wyeksportowano vault.',
-          'The vault was exported.',
-        ),
-      );
+      _notify(tr('Wyeksportowano vault.', 'The vault was exported.'));
     }
   });
 
@@ -2997,11 +3001,11 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                 child: Text(
                   tr(
                     'Urządzenie „$device” ustawiło się jako źródło prawdy. '
-                    'Nowa wersja z serwera czeka na Twoją decyzję — nic nie '
-                    'zostało pobrane.',
+                        'Nowa wersja z serwera czeka na Twoją decyzję — nic nie '
+                        'zostało pobrane.',
                     'Device “$device” set itself as the source of truth. The new '
-                    'server version waits for your decision — nothing has been '
-                    'downloaded.',
+                        'server version waits for your decision — nothing has been '
+                        'downloaded.',
                   ),
                   style: const TextStyle(fontSize: 12, height: 1.3),
                 ),
@@ -3063,10 +3067,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   children: [
                     if (v.syncEnabled)
                       IconButton(
-                        tooltip: tr(
-                          'Status synchronizacji',
-                          'Sync status',
-                        ),
+                        tooltip: tr('Status synchronizacji', 'Sync status'),
                         icon: const Icon(Icons.sync),
                         onPressed: repo.vaultDeletionPending(v.id)
                             ? null
@@ -3452,9 +3453,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           child: _syncBadge(small: true),
                         ),
                       if (_quickSwitcherOpen)
-                        Positioned.fill(
-                          child: _quickSwitcher(),
-                        ),
+                        Positioned.fill(child: _quickSwitcher()),
                     ],
                   ),
                 ),
@@ -3530,9 +3529,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return _classicSidebar(mobile);
   }
 
-  /// Compact sidebar: the entire content (header, vault chooser, filters,
-  /// search, tree, footer) scrolls as one unit.  The search field sticks to
-  /// the top via a `SliverPersistentHeader` once the user scrolls past it.
+  /// Compact sidebar: the header, vault chooser, filters, search and tree
+  /// scroll as one unit; the action footer stays pinned to the bottom edge and
+  /// never scrolls away with the note tree.  The search field sticks to the
+  /// top via a `SliverPersistentHeader` once the user scrolls past it.
   Widget _compactSidebar(bool mobile) {
     WidgetsBinding.instance.addPostFrameCallback((_) => _measureSearchField());
     return Container(
@@ -3543,226 +3543,197 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
           colors: [sidebar, sidebarDeep],
         ),
       ),
-      child: CustomScrollView(
-        key: const Key('compact-tree-list'),
-        slivers: [
-          // ── Header ──
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 18, 6, 18),
-              child: Row(
-                children: [
-                  const SiliqueMark(size: 30),
-                  const SizedBox(width: 9),
-                  const Expanded(
-                    child: Text(
-                      'SILIQUE',
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 17,
-                        fontWeight: FontWeight.w700,
-                        letterSpacing: .4,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    key: const Key('sidebar-toggle-notes-list'),
-                    tooltip: _sidebarCollapsed
-                        ? tr('Pokaż menu boczne', 'Show sidebar')
-                        : tr('Ukryj menu boczne', 'Hide sidebar'),
-                    icon: Icon(
-                      _sidebarCollapsed
-                          ? Icons.keyboard_double_arrow_right
-                          : Icons.keyboard_double_arrow_left,
-                      size: 17,
-                    ),
-                    onPressed: () =>
-                        setState(() => _sidebarCollapsed = !_sidebarCollapsed),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // ── Vault chooser ──
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: _vaultChooser(),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 12)),
-          // ── New note button ──
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-              child: _newNoteButton(mobile),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 12)),
-          // ── Nav items ──
-          SliverToBoxAdapter(
-            child: _nav(
-              Icons.calendar_month_outlined,
-              tr('Nowy wpis w dzienniku', 'New journal entry'),
-              () => _runFromDrawer(mobile, () => _newNote(journal: true)),
-            ),
-          ),
-          const SliverToBoxAdapter(child: SizedBox(height: 12)),
-          // ── Divider + folders label ──
-          const SliverToBoxAdapter(child: Divider(height: 1)),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text(
-                      tr('FOLDERY', 'FOLDERS'),
-                      style: TextStyle(
-                        fontSize: 10,
-                        letterSpacing: .6,
-                        color: muted,
-                      ),
-                    ),
-                  ),
-                  IconButton(
-                    key: const Key('new-root-folder'),
-                    onPressed: unlocked ? () => _folderDialog() : null,
-                    icon: const Icon(
-                      Icons.create_new_folder_outlined,
-                      size: 15,
-                    ),
-                    tooltip: tr('Nowy folder', 'New folder'),
-                  ),
-                ],
-              ),
-            ),
-          ),
-          // ── Sticky search field ──
-          SliverPersistentHeader(
-            pinned: true,
-            delegate: _FixedExtentDelegate(
-              extent: _searchFieldExtent,
-              child: Container(
-                key: _searchFieldMeasureKey,
-                color: sidebarDeep,
-                child: _searchField(false),
-              ),
-            ),
-          ),
-          // ── Compact filter chips ──
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(13, 0, 13, 8),
-              child: Row(
-                children: [
-                  Expanded(
+      child: Column(
+        children: [
+          Expanded(
+            child: CustomScrollView(
+              key: const Key('compact-tree-list'),
+              slivers: [
+                // ── Header ──
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(16, 18, 6, 18),
                     child: Row(
                       children: [
-                        for (final f in ['Ostatnie', 'Ulubione'])
-                          Padding(
-                            padding: const EdgeInsets.only(right: 6),
-                            child: InkWell(
-                              key: Key('compact-filter-$f'),
-                              borderRadius: BorderRadius.circular(18),
-                              onTap: () => _filterBy(f),
-                              child: Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 10,
-                                  vertical: 7,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: _filter == f
-                                      ? accent.withValues(alpha: .12)
-                                      : Colors.transparent,
-                                  border: Border.all(
-                                    color: line.withValues(alpha: .5),
-                                  ),
-                                  borderRadius: BorderRadius.circular(18),
-                                ),
-                                child: Text(
-                                  _filterLabel(f),
-                                  style: TextStyle(
-                                    fontSize: 10,
-                                    color: _filter == f ? accent : muted,
-                                  ),
-                                ),
-                              ),
+                        const SiliqueMark(size: 30),
+                        const SizedBox(width: 9),
+                        const Expanded(
+                          child: Text(
+                            'SILIQUE',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: TextStyle(
+                              fontSize: 17,
+                              fontWeight: FontWeight.w700,
+                              letterSpacing: .4,
                             ),
                           ),
+                        ),
+                        IconButton(
+                          key: const Key('sidebar-toggle-notes-list'),
+                          tooltip: _sidebarCollapsed
+                              ? tr('Pokaż menu boczne', 'Show sidebar')
+                              : tr('Ukryj menu boczne', 'Hide sidebar'),
+                          icon: Icon(
+                            _sidebarCollapsed
+                                ? Icons.keyboard_double_arrow_right
+                                : Icons.keyboard_double_arrow_left,
+                            size: 17,
+                          ),
+                          onPressed: () => setState(
+                            () => _sidebarCollapsed = !_sidebarCollapsed,
+                          ),
+                        ),
                       ],
                     ),
                   ),
-                  IconButton(
-                    key: const Key('compact-select-mode'),
-                    tooltip: _selecting
-                        ? tr('Zakończ zaznaczanie', 'Finish selecting')
-                        : tr('Zaznacz wiele notatek', 'Select multiple notes'),
-                    icon: Icon(
-                      _selecting
-                          ? Icons.check_box
-                          : Icons.check_box_outline_blank,
-                      size: 17,
-                      color: _selecting ? accent : null,
+                ),
+                // ── Vault chooser ──
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: _vaultChooser(),
+                  ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                // ── New note button ──
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.symmetric(horizontal: 14),
+                    child: _newNoteButton(mobile),
+                  ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                // ── Nav items ──
+                SliverToBoxAdapter(
+                  child: _nav(
+                    Icons.calendar_month_outlined,
+                    tr('Nowy wpis w dzienniku', 'New journal entry'),
+                    () => _runFromDrawer(mobile, () => _newNote(journal: true)),
+                  ),
+                ),
+                const SliverToBoxAdapter(child: SizedBox(height: 12)),
+                // ── Divider + folders label ──
+                const SliverToBoxAdapter(child: Divider(height: 1)),
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 12, 12, 4),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            tr('FOLDERY', 'FOLDERS'),
+                            style: TextStyle(
+                              fontSize: 10,
+                              letterSpacing: .6,
+                              color: muted,
+                            ),
+                          ),
+                        ),
+                        IconButton(
+                          key: const Key('new-root-folder'),
+                          onPressed: unlocked ? () => _folderDialog() : null,
+                          icon: const Icon(
+                            Icons.create_new_folder_outlined,
+                            size: 15,
+                          ),
+                          tooltip: tr('Nowy folder', 'New folder'),
+                        ),
+                      ],
                     ),
-                    onPressed: () => setState(() {
-                      if (_selecting) {
-                        _clearSelection();
-                      } else {
-                        _selecting = true;
-                      }
-                    }),
                   ),
-                ],
-              ),
+                ),
+                // ── Sticky search field ──
+                SliverPersistentHeader(
+                  pinned: true,
+                  delegate: _FixedExtentDelegate(
+                    extent: _searchFieldExtent,
+                    child: Container(
+                      key: _searchFieldMeasureKey,
+                      color: sidebarDeep,
+                      child: _searchField(false),
+                    ),
+                  ),
+                ),
+                // ── Compact filter chips ──
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: const EdgeInsets.fromLTRB(13, 0, 13, 8),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: Row(
+                            children: [
+                              for (final f in ['Ostatnie', 'Ulubione'])
+                                Padding(
+                                  padding: const EdgeInsets.only(right: 6),
+                                  child: InkWell(
+                                    key: Key('compact-filter-$f'),
+                                    borderRadius: BorderRadius.circular(18),
+                                    onTap: () => _filterBy(f),
+                                    child: Container(
+                                      padding: const EdgeInsets.symmetric(
+                                        horizontal: 10,
+                                        vertical: 7,
+                                      ),
+                                      decoration: BoxDecoration(
+                                        color: _filter == f
+                                            ? accent.withValues(alpha: .12)
+                                            : Colors.transparent,
+                                        border: Border.all(
+                                          color: line.withValues(alpha: .5),
+                                        ),
+                                        borderRadius: BorderRadius.circular(18),
+                                      ),
+                                      child: Text(
+                                        _filterLabel(f),
+                                        style: TextStyle(
+                                          fontSize: 10,
+                                          color: _filter == f ? accent : muted,
+                                        ),
+                                      ),
+                                    ),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                        IconButton(
+                          key: const Key('compact-select-mode'),
+                          tooltip: _selecting
+                              ? tr('Zakończ zaznaczanie', 'Finish selecting')
+                              : tr(
+                                  'Zaznacz wiele notatek',
+                                  'Select multiple notes',
+                                ),
+                          icon: Icon(
+                            _selecting
+                                ? Icons.check_box
+                                : Icons.check_box_outline_blank,
+                            size: 17,
+                            color: _selecting ? accent : null,
+                          ),
+                          onPressed: () => setState(() {
+                            if (_selecting) {
+                              _clearSelection();
+                            } else {
+                              _selecting = true;
+                            }
+                          }),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                // ── Tree (folders + notes) or flat filtered list ──
+                ...(_compactTree
+                    ? _compactTreeSlivers(mobile)
+                    : _compactFilteredSlivers(mobile)),
+              ],
             ),
           ),
-          // ── Tree (folders + notes) or flat filtered list ──
-          ...(_compactTree
-              ? _compactTreeSlivers(mobile)
-              : _compactFilteredSlivers(mobile)),
-          // ── Footer ──
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-              child: Row(
-                key: const Key('sidebar-footer-actions'),
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  _footerAction(
-                    label: tr('Usunięte', 'Deleted'),
-                    icon: Icons.delete_outline,
-                    selected: _filter == 'Kosz',
-                    onPressed: () =>
-                        _runFromDrawer(mobile, () => _filterBy('Kosz')),
-                  ),
-                  _footerAction(
-                    key: const Key('hidden-folder-nav'),
-                    label: _filterLabel('Ukryte'),
-                    icon: Icons.lock_outline,
-                    selected: _inHidden,
-                    onPressed: () =>
-                        _runFromDrawer(mobile, () => _filterBy('Ukryte')),
-                  ),
-                  _footerAction(
-                    label: tr('Importuj', 'Import'),
-                    icon: Icons.file_upload_outlined,
-                    onPressed: !unlocked || _inHidden || _busy
-                        ? null
-                        : () =>
-                              _runFromDrawer(mobile, () => _run(_importVault)),
-                  ),
-                  _footerAction(
-                    key: const Key('sidebar-settings-nav'),
-                    label: tr('Ustawienia', 'Settings'),
-                    icon: Icons.settings_outlined,
-                    onPressed: () => _runFromDrawer(mobile, _settings),
-                  ),
-                ],
-              ),
-            ),
-          ),
+          // ── Footer (pinned to the bottom, outside the scroll view) ──
+          _sidebarFooter(mobile),
         ],
       ),
     );
@@ -3891,46 +3862,55 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ],
                 ),
         ),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
-          child: Row(
-            key: const Key('sidebar-footer-actions'),
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              _footerAction(
-                label: tr('Usunięte', 'Deleted'),
-                icon: Icons.delete_outline,
-                selected: _filter == 'Kosz',
-                onPressed: () =>
-                    _runFromDrawer(mobile, () => _filterBy('Kosz')),
-              ),
-              _footerAction(
-                key: const Key('hidden-folder-nav'),
-                label: _filterLabel('Ukryte'),
-                icon: Icons.lock_outline,
-                selected: _inHidden,
-                onPressed: () =>
-                    _runFromDrawer(mobile, () => _filterBy('Ukryte')),
-              ),
-              _footerAction(
-                label: tr('Importuj', 'Import'),
-                icon: Icons.file_upload_outlined,
-                onPressed: !unlocked || _inHidden || _busy
-                    ? null
-                    : () => _runFromDrawer(mobile, () => _run(_importVault)),
-              ),
-              _footerAction(
-                key: const Key('sidebar-settings-nav'),
-                label: tr('Ustawienia', 'Settings'),
-                icon: Icons.settings_outlined,
-                onPressed: () => _runFromDrawer(mobile, _settings),
-              ),
-            ],
-          ),
+        _sidebarFooter(mobile),
+      ],
+    ),
+  );
+
+  /// Shared action footer (Usunięte / Ukryte / Importuj / Ustawienia): four
+  /// equal-width icon-only buttons with a floating label on hover. Pinned to
+  /// the bottom of both sidebar variants, outside the scrollable tree.
+  Widget _sidebarFooter(bool mobile) => Padding(
+    padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+    child: Row(
+      key: const Key('sidebar-footer-actions'),
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _footerAction(
+          key: const Key('deleted-folder-nav'),
+          label: tr('Usunięte', 'Deleted'),
+          icon: Icons.delete_outline,
+          selected: _filter == 'Kosz',
+          onPressed: () => _runFromDrawer(mobile, () => _filterBy('Kosz')),
+        ),
+        _footerAction(
+          key: const Key('hidden-folder-nav'),
+          label: _filterLabel('Ukryte'),
+          icon: Icons.lock_outline,
+          selected: _inHidden,
+          onPressed: () => _runFromDrawer(mobile, () => _filterBy('Ukryte')),
+        ),
+        _footerAction(
+          key: const Key('import-folder-nav'),
+          label: tr('Importuj', 'Import'),
+          icon: Icons.file_upload_outlined,
+          onPressed: !unlocked || _inHidden || _busy
+              ? null
+              : () => _runFromDrawer(mobile, () => _run(_importVault)),
+        ),
+        _footerAction(
+          key: const Key('sidebar-settings-nav'),
+          label: tr('Ustawienia', 'Settings'),
+          icon: Icons.settings_outlined,
+          onPressed: () => _runFromDrawer(mobile, _settings),
         ),
       ],
     ),
   );
+
+  /// One icon-only footer action. Hovering reveals a floating label pill above
+  /// the button (see `FloatingFooterLabel`); the accessible text lives in a
+  /// `Tooltip`/`Semantics` layer so keyboard and screen-reader users keep it.
   Widget _footerAction({
     Key? key,
     required String label,
@@ -3943,28 +3923,29 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final foreground = selected ? accent : muted;
     return Expanded(
       key: key,
-      child: Material(
-        color: selected ? accent.withValues(alpha: .12) : Colors.transparent,
-        borderRadius: BorderRadius.circular(6),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(6),
-          onTap: onPressed,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 2, vertical: 10),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Icon(icon, size: 19, color: foreground),
-                const SizedBox(height: 5),
-                SizedBox(
-                  width: double.infinity,
-                  child: Text(
-                    label,
-                    textAlign: TextAlign.center,
-                    style: TextStyle(fontSize: 10, color: foreground),
-                  ),
+      child: FloatingFooterLabel(
+        label: label,
+        // Accessibility text only: a native Tooltip would open on the same
+        // hover and show a second label next to the floating pill, so the
+        // label reaches assistive tech through Semantics instead.
+        child: Semantics(
+          button: true,
+          label: label,
+          child: Material(
+            color: selected
+                ? accent.withValues(alpha: .12)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(6),
+            child: InkWell(
+              borderRadius: BorderRadius.circular(6),
+              onTap: onPressed,
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 2,
+                  vertical: 10,
                 ),
-              ],
+                child: Center(child: Icon(icon, size: 19, color: foreground)),
+              ),
             ),
           ),
         ),
@@ -4300,40 +4281,36 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     ),
   );
 
-  Widget _nav(
-    IconData icon,
-    String label,
-    VoidCallback onTap, {
-    Key? navKey,
-  }) => Padding(
-    padding: const EdgeInsets.symmetric(horizontal: 14),
-    child: TextButton(
-      key: navKey ?? const Key('new-journal-entry'),
-      onPressed: onTap,
-      style: TextButton.styleFrom(
-        foregroundColor: navForeground,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
-        alignment: Alignment.centerLeft,
-      ),
-      child: Row(
-        children: [
-          Icon(icon, size: 19),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Text(
-              label,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: const TextStyle(fontSize: 12),
+  Widget _nav(IconData icon, String label, VoidCallback onTap, {Key? navKey}) =>
+      Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14),
+        child: TextButton(
+          key: navKey ?? const Key('new-journal-entry'),
+          onPressed: onTap,
+          style: TextButton.styleFrom(
+            foregroundColor: navForeground,
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(8),
             ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 13),
+            alignment: Alignment.centerLeft,
           ),
-        ],
-      ),
-    ),
-  );
+          child: Row(
+            children: [
+              Icon(icon, size: 19),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Text(
+                  label,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 12),
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
   Widget _dragFeedback(
     String label,
     IconData icon,
@@ -4639,9 +4616,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       (folderPath == null
                           ? null
                           : _folderColorOf(folderPath)) ??
-                      (icon == Icons.folder_outlined
-                          ? folderIcon
-                          : muted),
+                      (icon == Icons.folder_outlined ? folderIcon : muted),
                 ),
                 const SizedBox(width: 9),
                 Expanded(
@@ -5433,9 +5408,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           style: TextStyle(
                             fontSize: 12,
                             fontWeight: FontWeight.w400,
-                            color: selected
-                                ? Colors.white
-                                : textSecondary,
+                            color: selected ? Colors.white : textSecondary,
                           ),
                         )
                       : Column(
@@ -5709,7 +5682,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     // A skipped vault counts as a genuinely unsuccessful pass alongside a save
     // error and an offline sync failure.
     final issue = _activeSyncIssue;
-    final failed = issue != null ||
+    final failed =
+        issue != null ||
         _status.startsWith('Błąd') ||
         _status.startsWith('Offline');
     final synced = issue == null && _status.startsWith('Zsynchronizowano');
@@ -5758,8 +5732,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         onTap: currentVault == null || currentVault.syncEnabled != true
             ? null
             : (repo.syncStatus(currentVault.id)?.failing ?? false)
-                ? () => _openSyncStatus(currentVault)
-                : () => _sync(),
+            ? () => _openSyncStatus(currentVault)
+            : () => _sync(),
         borderRadius: BorderRadius.circular(8),
         child: Padding(padding: const EdgeInsets.all(3), child: indicator),
       ),
@@ -5768,12 +5742,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _breadcrumbs(bool mobile) {
     final note = _noteById(_selected?.id) ?? _selected!;
-    final parts = (_inHidden
-            ? _filterLabel('Ukryte')
-            : localizeSystemFolderPath(note.folder))
-        .split('/')
-        .where((part) => part.isNotEmpty)
-        .toList();
+    final parts =
+        (_inHidden
+                ? _filterLabel('Ukryte')
+                : localizeSystemFolderPath(note.folder))
+            .split('/')
+            .where((part) => part.isNotEmpty)
+            .toList();
     return Padding(
       key: const Key('note-breadcrumbs'),
       padding: EdgeInsets.fromLTRB(mobile ? 16 : 26, 4, 12, 0),
@@ -6244,10 +6219,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                   ),
                   child: Text(
                     '#$tag',
-                    style: const TextStyle(
-                      fontSize: 11,
-                      color: chipText,
-                    ),
+                    style: const TextStyle(fontSize: 11, color: chipText),
                   ),
                 ),
               ),

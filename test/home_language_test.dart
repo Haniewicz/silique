@@ -101,7 +101,9 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(find.text('All notes'), findsOneWidget);
-      expect(find.text('Deleted'), findsOneWidget);
+      final semantics = tester.ensureSemantics();
+      expect(find.bySemanticsLabel('Deleted'), findsOneWidget);
+      semantics.dispose();
       expect(find.byKey(const Key('sidebar-settings-nav')), findsOneWidget);
       expect(find.text('Moja istniejąca notatka'), findsWidgets);
       expect(

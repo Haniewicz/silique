@@ -163,7 +163,7 @@ void main() {
     });
 
     await mount(tester, repo, desktop: true);
-    await tester.tap(find.text('Deleted'));
+    await tester.tap(find.byKey(const Key('deleted-folder-nav')));
     await tester.pumpAndSettle();
     await tester.tap(
       find.byKey(Key('note-card-${note.id}')),

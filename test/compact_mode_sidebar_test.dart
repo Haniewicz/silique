@@ -150,7 +150,7 @@ void main() {
     await tester.tap(sidebarToggle());
     await tester.pumpAndSettle();
     expect(searchField(), findsNothing);
-    await tester.tap(find.text('Usunięte'));
+    await tester.tap(find.byKey(const Key('deleted-folder-nav')));
     await tester.pumpAndSettle();
     expect(
       searchField(),

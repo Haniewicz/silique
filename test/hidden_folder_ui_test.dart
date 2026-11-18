@@ -566,7 +566,10 @@ void main() {
     await tester.tap(find.byTooltip('Foldery i vaulty'));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('hidden-folder-nav')), findsOneWidget);
-    expect(find.text('Ukryte'), findsOneWidget);
+    // The footer is icon-only: the name lives in its accessibility label.
+    final semantics = tester.ensureSemantics();
+    expect(find.bySemanticsLabel('Ukryte'), findsOneWidget);
+    semantics.dispose();
   });
 
   testWidgets(

@@ -57,16 +57,32 @@ void main() {
       await tester.pumpAndSettle();
       final footer = find.byKey(const Key('sidebar-footer-actions'));
       expect(footer, findsOneWidget);
-      final labels = ['Usunięte', 'Ukryte', 'Importuj', 'Ustawienia']
-          .map(
-            (label) => find.descendant(of: footer, matching: find.text(label)),
-          )
-          .toList();
-      expect(tester.getTopLeft(labels[0]).dy, tester.getTopLeft(labels[1]).dy);
-      expect(tester.getTopLeft(labels[1]).dy, tester.getTopLeft(labels[2]).dy);
-      expect(tester.getTopLeft(labels[2]).dy, tester.getTopLeft(labels[3]).dy);
+      final actions =
+          [
+                'deleted-folder-nav',
+                'hidden-folder-nav',
+                'import-folder-nav',
+                'sidebar-settings-nav',
+              ]
+              .map(
+                (key) =>
+                    find.descendant(of: footer, matching: find.byKey(Key(key))),
+              )
+              .toList();
+      expect(
+        tester.getTopLeft(actions[0]).dy,
+        tester.getTopLeft(actions[1]).dy,
+      );
+      expect(
+        tester.getTopLeft(actions[1]).dy,
+        tester.getTopLeft(actions[2]).dy,
+      );
+      expect(
+        tester.getTopLeft(actions[2]).dy,
+        tester.getTopLeft(actions[3]).dy,
+      );
       expect(tester.takeException(), isNull);
-      await tester.tap(labels[2]);
+      await tester.tap(actions[2]);
       await tester.pumpAndSettle();
       expect(find.byType(VaultImportDialog), findsOneWidget);
       expect(find.byKey(const Key('choose-import-file')), findsOneWidget);
@@ -99,7 +115,7 @@ void main() {
         'Selected.MD',
       );
       await mount(tester, repo, desktop: true);
-      await tester.tap(find.text('Importuj'));
+      await tester.tap(find.byKey(const Key('import-folder-nav')));
       await tester.pumpAndSettle();
       await tester.tap(find.byKey(const Key('choose-import-file')));
       await drainUntil(
@@ -137,7 +153,7 @@ void main() {
   ) async {
     final repo = await fixture(tester);
     await mount(tester, repo, desktop: true);
-    await tester.tap(find.text('Importuj'));
+    await tester.tap(find.byKey(const Key('import-folder-nav')));
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('choose-import-file')), findsOneWidget);
     expect(find.byKey(const Key('choose-import-vault')), findsOneWidget);
@@ -149,41 +165,55 @@ void main() {
     testWidgets(
       'footer actions share a horizontal row of four entries $language',
       (tester) async {
+        final semantics = tester.ensureSemantics();
         final repo = await fixture(tester);
         await tester.runAsync(() => appLanguage.setLanguage(language));
         await mount(tester, repo, desktop: true);
         final footer = find.byKey(const Key('sidebar-footer-actions'));
         final deleted = find.descendant(
           of: footer,
-          matching: find.text(language == 'pl' ? 'Usunięte' : 'Deleted'),
+          matching: find.byKey(const Key('deleted-folder-nav')),
         );
         final hidden = find.descendant(
           of: footer,
-          matching: find.text(language == 'pl' ? 'Ukryte' : 'Hidden'),
+          matching: find.byKey(const Key('hidden-folder-nav')),
         );
         final import = find.descendant(
           of: footer,
-          matching: find.text(language == 'pl' ? 'Importuj' : 'Import'),
+          matching: find.byKey(const Key('import-folder-nav')),
         );
         final settings = find.descendant(
           of: footer,
-          matching: find.text(language == 'pl' ? 'Ustawienia' : 'Settings'),
+          matching: find.byKey(const Key('sidebar-settings-nav')),
         );
         expect(deleted, findsOneWidget);
         expect(hidden, findsOneWidget);
         expect(import, findsOneWidget);
         expect(settings, findsOneWidget);
+        // Each button carries its label only as an accessible tooltip, in the
+        // active language, never as a visible Text label.
+        final labels = language == 'pl'
+            ? ['Usunięte', 'Ukryte', 'Importuj', 'Ustawienia']
+            : ['Deleted', 'Hidden', 'Import', 'Settings'];
+        for (final label in labels) {
+          expect(find.bySemanticsLabel(label), findsOneWidget);
+          expect(
+            find.descendant(of: footer, matching: find.text(label)),
+            findsNothing,
+            reason: 'footer buttons show icons only; the label is hover-only',
+          );
+        }
         final a = tester.getRect(deleted),
             b = tester.getRect(hidden),
             c = tester.getRect(import),
             d = tester.getRect(settings);
-        // Labels may wrap with large/Ahem fonts; their first line stays aligned.
+        // The four icon-only buttons stay aligned in a single horizontal row.
         expect(a.top, closeTo(b.top, 1));
         expect(b.top, closeTo(c.top, 1));
         expect(c.top, closeTo(d.top, 1));
-        expect(a.right, lessThan(b.left));
-        expect(b.right, lessThan(c.left));
-        expect(c.right, lessThan(d.left));
+        expect(a.right, lessThanOrEqualTo(b.left));
+        expect(b.right, lessThanOrEqualTo(c.left));
+        expect(c.right, lessThanOrEqualTo(d.left));
         expect(find.text('Importuj Markdown'), findsNothing);
         expect(find.text('Import vault from folder'), findsNothing);
         await tester.tap(deleted);
@@ -192,6 +222,7 @@ void main() {
         expect(tester.takeException(), isNull);
         await tester.pumpWidget(const SizedBox());
         await tester.pumpAndSettle();
+        semantics.dispose();
         await tester.runAsync(() => appLanguage.setLanguage('pl'));
       },
     );
