@@ -1,7 +1,9 @@
-import 'package:flutter/foundation.dart' show debugDefaultTargetPlatformOverride;
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:silique/core/models.dart';
 import 'package:silique/ui/quick_switcher.dart';
 
 import 'hidden_notes_home_test.dart' as home;
@@ -59,7 +61,11 @@ void main() {
     // The quick switcher panel is initially absent.
     expect(find.byKey(const Key('quick-switcher-field')), findsNothing);
 
-    _press(LogicalKeyboardKey.keyK, PhysicalKeyboardKey.keyK, modifier: LogicalKeyboardKey.controlLeft);
+    _press(
+      LogicalKeyboardKey.keyK,
+      PhysicalKeyboardKey.keyK,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
@@ -89,7 +95,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(titleField.focusNode!.hasFocus, isTrue);
 
-    _press(LogicalKeyboardKey.keyK, PhysicalKeyboardKey.keyK, modifier: LogicalKeyboardKey.controlLeft);
+    _press(
+      LogicalKeyboardKey.keyK,
+      PhysicalKeyboardKey.keyK,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
     await tester.pumpAndSettle();
 
     expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
@@ -117,7 +127,11 @@ void main() {
       await repo.save(beta.copyWith(title: 'Beta note'));
     });
 
-    _press(LogicalKeyboardKey.keyK, PhysicalKeyboardKey.keyK, modifier: LogicalKeyboardKey.controlLeft);
+    _press(
+      LogicalKeyboardKey.keyK,
+      PhysicalKeyboardKey.keyK,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
 
@@ -139,7 +153,11 @@ void main() {
     expect(find.byKey(const Key('quick-switcher-field')), findsNothing);
 
     // Esc closes without opening (reopen and press escape).
-    _press(LogicalKeyboardKey.keyK, PhysicalKeyboardKey.keyK, modifier: LogicalKeyboardKey.controlLeft);
+    _press(
+      LogicalKeyboardKey.keyK,
+      PhysicalKeyboardKey.keyK,
+      modifier: LogicalKeyboardKey.controlLeft,
+    );
     await tester.pumpAndSettle();
     expect(find.byKey(const Key('quick-switcher-field')), findsOneWidget);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
@@ -237,5 +255,180 @@ void main() {
     } finally {
       debugDefaultTargetPlatformOverride = null;
     }
+  });
+
+  group('tag search', () {
+    Note tagged(String id, String title, List<String> tags) => Note(
+      id: id,
+      vaultId: 'vault',
+      title: title,
+      body: '',
+      updatedAt: DateTime.utc(2026, 1, 1),
+      tags: tags,
+    );
+
+    Future<void> pump(
+      WidgetTester tester,
+      List<Note> notes, {
+      ValueChanged<Note>? onOpen,
+      VoidCallback? onClose,
+    }) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: QuickSwitcher(
+              notes: notes,
+              onOpen: onOpen ?? (_) {},
+              onClose: onClose ?? () {},
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> type(WidgetTester tester, String text) async {
+      await tester.enterText(
+        find.byKey(const Key('quick-switcher-field')),
+        text,
+      );
+      await tester.pumpAndSettle();
+    }
+
+    Future<void> pressEnter(WidgetTester tester) async {
+      await tester.sendKeyEvent(LogicalKeyboardKey.enter);
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('typing # lists the vault tags, most used first', (
+      tester,
+    ) async {
+      await pump(tester, [
+        tagged('a', 'Alfa', ['praca', 'plan']),
+        tagged('b', 'Beta', ['praca']),
+        tagged('c', 'Gamma', ['dom']),
+      ]);
+      await type(tester, '#');
+
+      expect(find.byKey(const Key('quick-switcher-tag-list')), findsOneWidget);
+      expect(find.byKey(const Key('quick-switcher-tag-praca')), findsOneWidget);
+      expect(find.byKey(const Key('quick-switcher-tag-plan')), findsOneWidget);
+      expect(find.byKey(const Key('quick-switcher-tag-dom')), findsOneWidget);
+      // `praca` is cited twice, so it precedes the single-use tags.
+      final praca = tester
+          .getTopLeft(find.byKey(const Key('quick-switcher-tag-praca')))
+          .dy;
+      final dom = tester
+          .getTopLeft(find.byKey(const Key('quick-switcher-tag-dom')))
+          .dy;
+      expect(praca, lessThan(dom));
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('quick-switcher-tag-praca')),
+          matching: find.text('2'),
+        ),
+        findsOneWidget,
+      );
+      // Note rows are replaced by tag suggestions while `#` is typed.
+      expect(find.byKey(const Key('quick-switcher-list')), findsNothing);
+    });
+
+    testWidgets('the # fragment narrows tags case-insensitively', (
+      tester,
+    ) async {
+      await pump(tester, [
+        tagged('a', 'Alfa', ['Praca']),
+        tagged('b', 'Beta', ['dom']),
+      ]);
+      await type(tester, '#pra');
+
+      expect(find.byKey(const Key('quick-switcher-tag-Praca')), findsOneWidget);
+      expect(find.byKey(const Key('quick-switcher-tag-dom')), findsNothing);
+    });
+
+    testWidgets('Enter on a tag filters the list to that tag\'s notes', (
+      tester,
+    ) async {
+      await pump(tester, [
+        tagged('a', 'Alfa', ['praca']),
+        tagged('b', 'Beta', ['dom']),
+      ]);
+      await type(tester, '#pra');
+      await pressEnter(tester);
+
+      expect(
+        find.byKey(const Key('quick-switcher-tag-filter')),
+        findsOneWidget,
+      );
+      expect(find.text('#praca'), findsOneWidget);
+      expect(find.byKey(const Key('quick-switcher-list')), findsOneWidget);
+      expect(find.text('Alfa'), findsOneWidget);
+      expect(find.text('Beta'), findsNothing);
+      // The field is cleared so typing narrows the tagged notes again.
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const Key('quick-switcher-field')))
+            .controller!
+            .text,
+        isEmpty,
+      );
+    });
+
+    testWidgets('a note opened from a tag filter is opened and closes', (
+      tester,
+    ) async {
+      Note? opened;
+      var closed = 0;
+      await pump(
+        tester,
+        [
+          tagged('a', 'Alfa', ['praca']),
+        ],
+        onOpen: (note) => opened = note,
+        onClose: () => closed++,
+      );
+      await type(tester, '#praca');
+      await pressEnter(tester);
+      await pressEnter(tester);
+
+      expect(opened?.title, 'Alfa');
+      expect(closed, 1);
+    });
+
+    testWidgets('Escape clears the tag filter before closing the switcher', (
+      tester,
+    ) async {
+      var closed = 0;
+      await pump(tester, [
+        tagged('a', 'Alfa', ['praca']),
+        tagged('b', 'Beta', ['dom']),
+      ], onClose: () => closed++);
+      await type(tester, '#praca');
+      await pressEnter(tester);
+      expect(
+        find.byKey(const Key('quick-switcher-tag-filter')),
+        findsOneWidget,
+      );
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(find.byKey(const Key('quick-switcher-tag-filter')), findsNothing);
+      expect(find.text('Beta'), findsOneWidget);
+      expect(closed, 0, reason: 'Escape drops the filter first');
+
+      await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+      await tester.pumpAndSettle();
+      expect(closed, 1);
+    });
+
+    testWidgets('# with no matching tag explains the empty state', (
+      tester,
+    ) async {
+      await pump(tester, [
+        tagged('a', 'Alfa', ['praca']),
+      ]);
+      await type(tester, '#zzz');
+      expect(find.textContaining('pasujących tagów'), findsOneWidget);
+    });
   });
 }
