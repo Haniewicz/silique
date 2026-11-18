@@ -71,8 +71,25 @@ Future<void> _openTab(WidgetTester tester, String tabKey) async {
   await tester.pumpAndSettle();
 }
 
-int _tabIndex(WidgetTester tester) =>
-    tester.widget<TabBar>(find.byType(TabBar)).controller!.index;
+const _sectionKeys = [
+  'settings-tab-general',
+  'settings-tab-appearance',
+  'settings-tab-shortcuts',
+  'settings-tab-account',
+  'settings-tab-storage',
+  'settings-tab-updates',
+];
+
+/// The visible settings section, read from the selected navigation tile: the
+/// desktop sidebar and the mobile section list share one Material+InkWell tile,
+/// so `_openTab` works in both layouts.
+int _tabIndex(WidgetTester tester) {
+  for (var i = 0; i < _sectionKeys.length; i++) {
+    final tile = tester.widget<Material>(find.byKey(Key(_sectionKeys[i])));
+    if (tile.color != Colors.transparent) return i;
+  }
+  return -1;
+}
 
 /// Taps the given appearance tile, picks the SV-center color and applies it,
 /// leaving the "apply existing" question on screen.

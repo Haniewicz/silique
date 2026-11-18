@@ -260,36 +260,58 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
-  testWidgets('settings tabs stay overflow-free on a narrow large-font phone', (
+  testWidgets('settings sections stay overflow-free on a narrow phone', (
     tester,
   ) async {
     final repo = await _sqliteNotebook(tester, 'silique-settings-narrow-');
     await tester.runAsync(
       () => repo.createVault('Compact', password: 'folder password 12345'),
     );
-    await tester.binding.setSurfaceSize(const Size(320, 640));
-    tester.platformDispatcher.textScaleFactorTestValue = 1.8;
+    // The view (not only the render target) must shrink so the panel really
+    // sees a phone-sized MediaQuery and renders the mobile layout.
+    tester.view.physicalSize = const Size(390, 844);
+    tester.view.devicePixelRatio = 1.0;
     addTearDown(() {
-      tester.platformDispatcher.clearTextScaleFactorTestValue();
-      return tester.binding.setSurfaceSize(null);
+      tester.view.resetPhysicalSize();
+      tester.view.resetDevicePixelRatio();
     });
     await _mountPanel(tester, repo, vault: repo.vaults.single);
-    // At 1.8x text scale a single tab label can be wider than the viewport,
-    // so the pages are traversed by swiping the TabBarView instead of tapping
-    // the tab bar. Every page must lay out without overflow.
-    final pages = find.byType(TabBarView);
-    for (var i = 0; i < 5; i++) {
-      await tester.fling(pages, const Offset(-400, 0), 2000);
+
+    // A phone shows the section list first: there is no tab strip and no
+    // sidebar, and every section is reachable through the list.
+    expect(find.byType(TabBar), findsNothing);
+    const sectionKeys = [
+      'settings-tab-general',
+      'settings-tab-appearance',
+      'settings-tab-shortcuts',
+      'settings-tab-account',
+      'settings-tab-storage',
+      'settings-tab-updates',
+    ];
+    for (final key in sectionKeys) {
+      final tile = find.byKey(Key(key));
+      await tester.ensureVisible(tile);
       await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull, reason: 'overflow on page $i');
-    }
-    final general = find.byKey(const Key('language-picker'));
-    for (var i = 0; i < 6 && general.hitTestable().evaluate().isEmpty; i++) {
-      await tester.fling(pages, const Offset(400, 0), 2000);
+      expect(tester.takeException(), isNull, reason: 'overflow on $key tile');
+      await tester.tap(tile);
       await tester.pumpAndSettle();
-      expect(tester.takeException(), isNull, reason: 'overflow swiping back');
+      expect(tester.takeException(), isNull, reason: 'overflow in $key page');
+      // Opening a section drills in; the back header returns to the list
+      // without closing the dialog.
+      final back = find.byKey(const Key('settings-back-to-list'));
+      expect(back, findsOneWidget);
+      await tester.tap(back);
+      await tester.pumpAndSettle();
     }
-    expect(general.hitTestable(), findsOneWidget);
+
+    // The list is still usable: opening General again drills into its content.
+    await tester.tap(find.byKey(const Key('settings-tab-general')));
+    await tester.pumpAndSettle();
+    expect(find.byKey(const Key('settings-back-to-list')), findsOneWidget);
+    expect(
+      find.byKey(const Key('language-picker'), skipOffstage: false),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox());
   });
