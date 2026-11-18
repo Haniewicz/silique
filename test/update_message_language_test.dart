@@ -178,8 +178,8 @@ void main() {
     ),
     (
       name: 'windows launched',
-      en: 'The installer has started. Confirm installation in its window, then launch Silique from its shortcut.',
-      pl: 'Uruchomiono instalator. Potwierdź instalację w jego oknie, a następnie uruchom Silique ze skrótu.',
+      en: 'The installer has started silently. When installation completes, Silique restarts automatically.',
+      pl: 'Instalator został uruchomiony cicho. Gdy instalacja się zakończy, Silique uruchomi się ponownie automatycznie.',
     ),
     (
       name: 'windows cancelled',

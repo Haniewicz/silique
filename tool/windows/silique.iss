@@ -60,8 +60,9 @@ Name: "{autodesktop}\Silique"; Filename: "{app}\silique.exe"; Tasks: desktopicon
 
 ; Setup never launches the notebook: a post-install launch inherits Setup's
 ; elevated token when the user started Setup "as administrator", and Inno's
-; RunasOriginalUser is not a de-elevation guarantee. The notebook must never run
-; with an administrator token, so the user starts it from the shortcut.
+; RunasOriginalUser is not a de-elevation guarantee. For an in-app update the
+; asInvoker guard relaunches "{app}\silique.exe" with the standard user's token
+; after Setup exits successfully; Setup itself still starts no notebook.
 [Code]
 // Native ownership/ACL/canonical checks have pinned the registered destination
 // before launch. Preserve that exact machine-wide directory, including custom

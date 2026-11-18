@@ -1,5 +1,7 @@
-// Wait-only asInvoker process. Never launches a process, shell or elevated
-// helper. Holds inherited locks BEFORE UAC, through app exit and real Inno exit.
+// Wait-only asInvoker process. Holds inherited locks BEFORE UAC, through app
+// exit and real Inno exit. Its only process launch is a successful in-app
+// install's relaunch of "{app}\silique.exe" with this guard's own standard-user
+// token — never Setup's elevated token and never on an install failure.
 #include "guard_protocol.h"
 #include <windows.h>
 #include <cstdint>
@@ -39,11 +41,35 @@ bool Transfer(HANDLE pipe, HANDLE cancel, void* data, DWORD length, bool write) 
   CloseHandle(operation.hEvent); return ok && bytes == length;
 }
 void RetainUntilCancellation(HANDLE cancel) { WaitForSingleObject(cancel, INFINITE); }
+// Start the freshly installed notebook with THIS asInvoker process's token: a
+// standard user token, never Setup's elevated token. The path is passed only by
+// the trusted app->guard handoff that already pinned the install directory; the
+// guard itself never accepts a launch path from an elevated party and never
+// launches anything on an install failure (no exit-code verification here).
+void RelaunchNotebook(const std::wstring& path) {
+  STARTUPINFOW startup{};
+  startup.cb = sizeof(startup);
+  PROCESS_INFORMATION child{};
+  std::wstring command = L"\"" + path + L"\"";
+  if (CreateProcessW(path.c_str(), command.data(), nullptr, nullptr, FALSE, 0,
+      nullptr, nullptr, &startup, &child)) {
+    CloseHandle(child.hThread);
+    CloseHandle(child.hProcess);
+  }
+}
 }
 int wmain(int argc, wchar_t** argv) {
   if (argc < 6 || argc > 512) return 2;
   std::vector<HANDLE> handles;
+  std::wstring relaunch;
   for (int i = 1; i < argc; ++i) {
+    // A plain (quoted) relaunch path may follow the inherited handle list. It is
+    // consumed verbatim and only acted on after a full, successful install.
+    if (std::wstring(argv[i]) == L"--relaunch") {
+      if (i + 1 >= argc) return 2;
+      relaunch = argv[++i];
+      continue;
+    }
     wchar_t* end = nullptr; const auto value = _wcstoui64(argv[i], &end, 10);
     if (!value || !end || *end || value > UINTPTR_MAX) return 2;
     const auto handle = reinterpret_cast<HANDLE>(static_cast<uintptr_t>(value)); DWORD flags = 0;
@@ -97,11 +123,31 @@ int wmain(int argc, wchar_t** argv) {
       Transfer(pipe, cancel, &ack, 1, true);
       // Even failed ACK or early pipe close does not release before process exit.
       HANDLE finish[]{cancel, consumer};
-      WaitForMultipleObjects(2, finish, FALSE, INFINITE);
+      // Relaunch only after a completed, successful install and only for an
+      // in-app update (relaunch path non-empty). Cancellation, an install
+      // failure exit code, or a missing relaunch path all fail closed: the user
+      // reopens the notebook from the shortcut, exactly as before this change.
+      if (WaitForMultipleObjects(2, finish, FALSE, INFINITE) == WAIT_OBJECT_0 + 1 &&
+          !relaunch.empty()) {
+        DWORD exit_code = 0;
+        if (GetExitCodeProcess(consumer, &exit_code) && exit_code == 0) {
+          // Release every inherited pin and the update gate BEFORE starting the
+          // new notebook: the fresh process opens that same gate during startup
+          // (AcquireWindowsApplicationInstance) and a still-held gate would make
+          // it refuse to run. Setup already exited, so nothing else needs them.
+          CloseHandle(consumer);
+          consumer = nullptr;
+          for (auto handle : handles) CloseHandle(handle);
+          handles.clear();
+          RelaunchNotebook(relaunch);
+          return 0;
+        }
+      }
     } else if (state != WAIT_OBJECT_0 && state != WAIT_OBJECT_0 + 1) {
       RetainUntilCancellation(cancel);
     }
-    CloseHandle(consumer); break;
+    if (consumer) CloseHandle(consumer);
+    break;
   }
   for (auto handle : handles) CloseHandle(handle);
   return 0;

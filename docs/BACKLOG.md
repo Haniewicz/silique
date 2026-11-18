@@ -60,3 +60,23 @@ Ograniczenia i weryfikacja urządzenia (nie ponowna implementacja zadania):
   administratorem; testy runnera nie potwierdzają tych scenariuszy;
 - brak Authenticode: Windows może pokazać nieznanego wydawcę. Nie omijać ochrony
   systemowej; po instalacji uruchomić Silique ze zwykłego skrótu.
+
+### 0.2.61: aktualizacja bez kreatora i automatyczny restart
+
+Na polecenie właściciela (2026-11-18) przepływ in-app na Windows został
+domknięty: Setup uruchamiany z aplikacji dostaje `/SILENT /SUPPRESSMSGBOXES
+/NORESTART` (bez kreatora i okien komunikatów; zgoda UAC nadal się pojawia,
+instalator pozostaje niepodpisany), a po zakończonej instalacji pinned proces
+`asInvoker` `silique_update_guard.exe` uruchamia ponownie `{app}\silique.exe`
+z **własnym tokenem zwykłego użytkownika** — nigdy z tokenem administratora.
+Guard zamyka odziedziczone piny i bramkę aktualizacji przed startem nowej
+aplikacji, bo świeży proces otwiera tę bramkę podczas startu.
+
+Relaunch jest wąski: tylko przy exit code 0, tylko dla aktualizacji z aplikacji
+(przy ręcznym uruchomieniu instalatora ścieżka jest pusta) i nigdy po anulowanej
+zgodzie UAC lub nieudanej instalacji — wtedy nic się nie uruchamia i użytkownik
+otwiera Silique ze skrótu, jak dotychczas.
+
+Ograniczenia: cichy przebieg, zgoda UAC, instalacja i relaunch wymagają testu na
+prawdziwym Windows; testy natywne/Dart pokrywają flagi, przekazanie `--relaunch`
+i kolejność zwalniania uchwytów, ale nie sam UAC ani przebieg instalatora.

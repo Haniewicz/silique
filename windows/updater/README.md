@@ -44,7 +44,9 @@ second installation despite `UsePreviousAppDir=no`.
    Before starting that copy, native code also retains its read-only
    `SEC_IMAGE_NO_EXECUTE` section and rehashes it against the protected original;
    failure to establish the section is fatal, including for a pre-existing copy.
-   It cannot launch anything. Its READY event is observed **before** requesting
+   It launches exactly one process: the relaunch of the updated notebook after a
+   successful in-app install (see "Silent install and relaunch"). Its READY event
+   is observed **before** requesting
    ordinary `runas` UAC. Inherited file/ancestor/image-section/gate handles survive
    the original application's exit.
 5. The random first-instance local pipe accepts a high-integrity client only.
@@ -68,15 +70,40 @@ second installation despite `UsePreviousAppDir=no`.
    deliberately failing closed; it can require logoff/reboot to clear an orphan
    gate. Never resume editing on an invented post-launch failure.
 
-Setup never launches the notebook with its elevated token. The user reopens it
-from the normal shortcut. The installer remains unsigned: unknown-publisher UAC
-is expected, not bypassed. The boundary does not defend against administrators,
+Setup never launches the notebook with its elevated token. The installer remains
+unsigned: unknown-publisher UAC is expected, not bypassed.
+
+## Silent install and relaunch (from 0.2.61)
+
+An in-app update runs Setup as `/SILENT /SUPPRESSMSGBOXES /NORESTART`: the UAC
+consent prompt still appears (Setup stays machine-wide and unsigned), but the
+installer wizard, its messages and the finish page do not, so the owner never
+has to walk through or re-run the installer after approving it.
+
+After the elevated Setup process exits, the pinned `asInvoker` guard relaunches
+`{app}\silique.exe` with **its own standard-user token** — never Setup's elevated
+token. The guard is the only process that survives the notebook's exit and holds
+the install identity; the relaunch path is passed by the trusted app-to-guard
+handoff, not by the elevated installer. Before `CreateProcess` the guard closes
+every inherited pin and the application/update gate, because the fresh notebook
+opens that gate during startup and would otherwise refuse to run.
+
+Relaunch is deliberately narrow: only when Setup's exit code is 0, only for an
+in-app update (the path is empty for a manual Setup run), and never after a
+cancelled UAC prompt or a failed/partial install. In those cases nothing is
+launched and the owner starts Silique from the shortcut, exactly as before. The boundary does not defend against administrators,
 SYSTEM or same-account arbitrary process termination/debugging. An uncooperative
 old executable launched after the legacy-process snapshot cannot honor the new
 mutex protocol; Inno must still never force-close it (file-in-use failure is
 preferable). This is not an unsaved-data handoff for arbitrary historical apps.
 
 ## Tests and evidence
+
+The silent flags, the `--relaunch` handoff and the handle-release ordering are
+covered by the native updater tests (Setup argument assertions, guard argument
+parsing) and by the Dart update-flow tests; the real UAC consent, silent Setup
+run, install and relaunch still require a native Windows run and are not
+verified by those tests.
 
 `tool/build_windows.ps1` builds the production targets and both native test
 executables, then invokes `tool/windows/test_updater_acceptance.ps1` on a clean,

@@ -302,7 +302,7 @@ std::unique_ptr<WindowsUpdateLocks> LockWindowsArtifact(const std::wstring& path
   return locks;
 }
 std::unique_ptr<WindowsUpdateGuard> StartWindowsUpdateGuard(const std::wstring& guard,
-    WindowsUpdateLocks& locks, HANDLE parent) {
+    WindowsUpdateLocks& locks, HANDLE parent, const std::wstring& relaunch) {
   auto result = std::make_unique<WindowsUpdateGuard>(); result->token = RandomToken();
   if (result->token.empty()) return nullptr;
   auto descriptor = UserDescriptor(true); if (!descriptor) return nullptr;
@@ -329,6 +329,10 @@ std::unique_ptr<WindowsUpdateGuard> StartWindowsUpdateGuard(const std::wstring& 
       inherited.data(), inherited.size() * sizeof(HANDLE), nullptr, nullptr) != FALSE;
   std::wstring command = L"\"" + guard + L"\"";
   for (const auto handle : inherited) command += L" " + std::to_wstring(reinterpret_cast<uintptr_t>(handle));
+  // The asInvoker guard relaunches the updated notebook only for an in-app,
+  // successful install. The path is a plain argument (quoted, never a handle);
+  // update_guard.cpp ignores it unless every protocol check below succeeds.
+  if (!relaunch.empty()) command += L" --relaunch \"" + relaunch + L"\"";
   STARTUPINFOEXW startup{}; startup.StartupInfo.cb = sizeof(startup); startup.lpAttributeList = list; PROCESS_INFORMATION child{};
   // An over-the-shoulder UAC administrator may duplicate a SYNCHRONIZE handle
   // of Inno itself into the guard. No need for a low user to open an admin's
@@ -411,11 +415,18 @@ std::string WindowsUpdater::install(HWND window, const std::wstring& path, const
   locks->handles.push_back(guard_image);
   if (Hash(copy) != guard_hash) return "failed";
   if (before_guard_start_) before_guard_start_();
-  auto held = StartWindowsUpdateGuard(guard, *locks, GetCurrentProcess());
+  // The guard relaunches "{app}\silique.exe" (verified install_dir + name) only
+  // after Inno exits successfully, and never with an elevated token: the guard
+  // is asInvoker and CreateProcess inherits the standard user's token.
+  auto held = StartWindowsUpdateGuard(guard, *locks, GetCurrentProcess(),
+      install_dir + L"\\silique.exe");
   if (!held) return "failed"; // no Setup has been started on any failure above
+  // In-app update runs without the interactive wizard: /SILENT keeps only the
+  // (non-interactive) progress view, /SUPPRESSMSGBOXES drops message boxes.
+  // UAC consent still applies; Setup is machine-wide and remains runas.
   const std::wstring arguments = L"/SILIQUEUPDATE=1 /SILIQUEGUARD=" + held->token +
       L" /SILIQUEGUARDPID=" + std::to_wstring(GetProcessId(held->process)) +
-      L" /NORESTART /NOCLOSEAPPLICATIONS /DIR=\"" + install_dir + L"\"";
+      L" /SILENT /SUPPRESSMSGBOXES /NORESTART /NOCLOSEAPPLICATIONS /DIR=\"" + install_dir + L"\"";
   SHELLEXECUTEINFOW launch{}; launch.cbSize = sizeof(launch);
   launch.fMask = SEE_MASK_NOCLOSEPROCESS | SEE_MASK_NOASYNC; launch.hwnd = window;
   launch.lpVerb = L"runas"; launch.lpFile = path.c_str(); launch.lpParameters = arguments.c_str();
