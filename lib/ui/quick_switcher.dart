@@ -48,6 +48,49 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
   String _query = '';
   int _highlight = 0;
 
+  /// The tag whose notes the switcher is filtered to, or null for an ordinary
+  /// text search. Picked from the `#` tag suggestions; cleared with Escape or
+  /// the chip's close button.
+  String? _tagFilter;
+
+  /// True while the typed query starts with `#`, i.e. the user asked for the
+  /// vault's tags instead of notes. A selected [_tagFilter] leaves this mode so
+  /// typing again narrows the tagged notes.
+  bool get _tagMode => _tagFilter == null && _query.trimLeft().startsWith('#');
+
+  /// The tag fragment typed after the leading `#` characters.
+  String get _tagQuery =>
+      _query.trimLeft().replaceFirst(RegExp(r'^#+'), '').trim();
+
+  /// Every tag used by the vault's loaded notes, with how many notes cite it.
+  /// Sorted by usage so the most relevant suggestions come first, then by name;
+  /// [_tagQuery] narrows the list case-insensitively.
+  List<_TagEntry> get _tagResults {
+    final counts = <String, int>{};
+    for (final note in widget.notes) {
+      for (final tag in note.tags) {
+        final name = tag.trim();
+        if (name.isEmpty) continue;
+        counts[name] = (counts[name] ?? 0) + 1;
+      }
+    }
+    final fragment = _tagQuery.toLowerCase();
+    final entries = [
+      for (final entry in counts.entries)
+        if (fragment.isEmpty || entry.key.toLowerCase().contains(fragment))
+          _TagEntry(entry.key, entry.value),
+    ];
+    entries.sort((a, b) {
+      final byCount = b.count.compareTo(a.count);
+      if (byCount != 0) return byCount;
+      return a.tag.toLowerCase().compareTo(b.tag.toLowerCase());
+    });
+    return entries;
+  }
+
+  /// Length of the list the arrows and Enter currently walk.
+  int get _itemCount => _tagMode ? _tagResults.length : _results.length;
+
   @override
   void initState() {
     super.initState();
@@ -74,9 +117,16 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
   }
 
   List<FuzzyMatch> get _results {
+    final filter = _tagFilter?.toLowerCase();
+    final candidates = filter == null
+        ? widget.notes
+        : [
+            for (final note in widget.notes)
+              if (note.tags.any((tag) => tag.toLowerCase() == filter)) note,
+          ];
     final q = _query.trim();
     if (q.isEmpty) {
-      final recency = List<Note>.of(widget.notes)
+      final recency = List<Note>.of(candidates)
         ..sort((a, b) => b.updatedAt.compareTo(a.updatedAt));
       return [
         for (final note in recency.take(8))
@@ -89,7 +139,7 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
       ];
     }
     final matches = <FuzzyMatch>[];
-    for (final note in widget.notes) {
+    for (final note in candidates) {
       final match = fuzzyMatchNote(note, q);
       if (match != null) matches.add(match);
     }
@@ -105,13 +155,53 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
     widget.onClose();
   }
 
+  void _selectTag(_TagEntry entry) {
+    _tagFilter = entry.tag;
+    if (_controller.text.isEmpty) {
+      setState(() => _highlight = 0);
+    } else {
+      // Clearing the field re-renders through the controller listener.
+      _controller.clear();
+    }
+    _focus.requestFocus();
+  }
+
+  void _clearTagFilter() {
+    if (_tagFilter == null) return;
+    setState(() {
+      _tagFilter = null;
+      _highlight = 0;
+    });
+    _focus.requestFocus();
+  }
+
+  /// Escape steps out of the current mode before closing: first the tag filter,
+  /// then the typed `#` query, and only then the switcher itself.
+  void _escape() {
+    if (_tagFilter != null) {
+      _clearTagFilter();
+      return;
+    }
+    if (_tagMode) {
+      _controller.clear();
+      return;
+    }
+    widget.onClose();
+  }
+
   void _moveHighlight(int delta) {
-    final results = _results;
-    if (results.isEmpty) return;
-    setState(() => _highlight = (_highlight + delta) % results.length);
+    final count = _itemCount;
+    if (count == 0) return;
+    setState(() => _highlight = (_highlight + delta) % count);
   }
 
   void _confirm() {
+    if (_tagMode) {
+      final tags = _tagResults;
+      if (tags.isEmpty) return;
+      _selectTag(tags[_highlight % tags.length]);
+      return;
+    }
     final results = _results;
     if (results.isEmpty) return;
     final index = _highlight < 0 ? 0 : _highlight % results.length;
@@ -135,8 +225,7 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
               listenable: appLanguage,
               builder: (context, _) => CallbackShortcuts(
                 bindings: {
-                  const SingleActivator(LogicalKeyboardKey.escape):
-                      widget.onClose,
+                  const SingleActivator(LogicalKeyboardKey.escape): _escape,
                   const SingleActivator(LogicalKeyboardKey.arrowDown): () =>
                       _moveHighlight(1),
                   const SingleActivator(LogicalKeyboardKey.arrowUp): () =>
@@ -168,12 +257,25 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
                           autofocus: true,
                           contextMenuBuilder: siliqueTextContextMenu,
                           decoration: InputDecoration(
-                            hintText: tr('Szukaj notatek…', 'Search notes…'),
+                            hintText: _tagMode
+                                ? tr('Szukaj tagów…', 'Search tags…')
+                                : _tagFilter != null
+                                ? tr(
+                                    'Szukaj w notatkach z tym tagiem…',
+                                    'Search notes with this tag…',
+                                  )
+                                : tr(
+                                    'Szukaj notatek… (wpisz #, aby szukać tagów)',
+                                    'Search notes… (type # to search tags)',
+                                  ),
                             prefixIcon: const Icon(Icons.search, size: 18),
                           ),
                         ),
                       ),
-                      Flexible(child: _resultsList(results)),
+                      if (_tagFilter != null) _tagFilterChip(_tagFilter!),
+                      Flexible(
+                        child: _tagMode ? _tagList() : _resultsList(results),
+                      ),
                       const SizedBox(height: 6),
                     ],
                   ),
@@ -244,6 +346,107 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
     );
   }
 
+  /// The active tag filter, shown under the field so the narrowing is visible
+  /// and can be dropped without closing the switcher.
+  Widget _tagFilterChip(String tag) => Padding(
+    padding: const EdgeInsets.fromLTRB(14, 0, 8, 4),
+    child: Row(
+      key: const Key('quick-switcher-tag-filter'),
+      children: [
+        Container(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+          decoration: BoxDecoration(
+            color: accent.withValues(alpha: .12),
+            borderRadius: BorderRadius.circular(8),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              const Icon(Icons.tag, size: 13, color: accent),
+              const SizedBox(width: 4),
+              Text(
+                '#$tag',
+                style: const TextStyle(fontSize: 12, color: accent),
+              ),
+            ],
+          ),
+        ),
+        const Spacer(),
+        IconButton(
+          key: const Key('quick-switcher-tag-clear'),
+          onPressed: _clearTagFilter,
+          icon: const Icon(Icons.close, size: 16),
+          tooltip: tr('Wyczyść filtr tagu', 'Clear the tag filter'),
+        ),
+      ],
+    ),
+  );
+
+  /// Tag suggestions for the typed `#` query: every tag used by the vault's
+  /// notes, narrowed case-insensitively, with its note count.
+  Widget _tagList() {
+    if (widget.locked) {
+      return _emptyHint(tr('Vault jest zablokowany.', 'The vault is locked.'));
+    }
+    final tags = _tagResults;
+    if (tags.isEmpty) {
+      if (widget.notes.isEmpty) {
+        return _emptyHint(
+          tr(
+            'Brak notatek w tym vaultcie.',
+            'There are no notes in this vault.',
+          ),
+        );
+      }
+      return _emptyHint(
+        _tagQuery.isEmpty
+            ? tr(
+                'Brak tagów w tym vaultcie.',
+                'There are no tags in this vault.',
+              )
+            : tr('Brak pasujących tagów.', 'No matching tags.'),
+      );
+    }
+    return ListView.builder(
+      key: const Key('quick-switcher-tag-list'),
+      shrinkWrap: true,
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 4),
+      itemCount: tags.length,
+      itemBuilder: (context, index) {
+        final entry = tags[index];
+        final selected = index == _highlight;
+        return InkWell(
+          key: Key('quick-switcher-tag-${entry.tag}'),
+          onTap: () => _selectTag(entry),
+          child: Container(
+            decoration: BoxDecoration(
+              color: selected ? cardSelected : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
+            ),
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+            child: Row(
+              children: [
+                const Icon(Icons.tag, size: 15, color: muted),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '#${entry.tag}',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Text(
+                  '${entry.count}',
+                  style: const TextStyle(color: muted, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   Widget _title(FuzzyMatch match) {
     final title = match.note.title;
     final indices = match.titleIndices;
@@ -278,4 +481,12 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
     padding: const EdgeInsets.all(20),
     child: Text(text, textAlign: TextAlign.center),
   );
+}
+
+/// One tag available in the active vault: its stored name (without `#`) and how
+/// many loaded notes cite it.
+class _TagEntry {
+  const _TagEntry(this.tag, this.count);
+  final String tag;
+  final int count;
 }
