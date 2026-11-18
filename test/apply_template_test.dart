@@ -236,7 +236,7 @@ void main() {
       await tester.pumpAndSettle();
 
       expect(
-        find.text('Create a note in the Szablony folder to add a template.'),
+        find.text('Create a note in the Templates folder to add a template.'),
         findsOneWidget,
       );
       await tester.tap(find.text('Cancel'));

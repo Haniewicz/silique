@@ -204,16 +204,27 @@ class SiliqueChoice<T> extends StatelessWidget {
     required this.onChanged,
     this.decoration,
     this.style,
+    this.triggerBuilder,
   });
   final T value;
   final List<SiliqueChoiceItem<T>> items;
   final ValueChanged<T>? onChanged;
   final InputDecoration? decoration;
   final TextStyle? style;
+
+  /// Replaces the selected item's [SiliqueChoiceItem.child] in the closed
+  /// trigger only. The popup menu keeps rendering the item's full [child]
+  /// unchanged. Useful when an item shows extra detail (e.g. a subtitle) in
+  /// the menu but must stay one line in the trigger. It receives the resolved
+  /// child (the selected item's child, or an empty placeholder when nothing
+  /// is selected) and must return the widget to render.
+  final Widget Function(Widget selectedChild)? triggerBuilder;
+
   @override
   Widget build(BuildContext context) {
     Localizations.localeOf(context);
     final selected = items.where((item) => item.value == value).firstOrNull;
+    final selectedChild = selected?.child ?? const SizedBox.shrink();
     final trigger = Row(
       children: [
         Expanded(
@@ -221,7 +232,7 @@ class SiliqueChoice<T> extends StatelessWidget {
             style: style ?? const TextStyle(fontSize: 13),
             maxLines: 1,
             overflow: TextOverflow.ellipsis,
-            child: selected?.child ?? const SizedBox.shrink(),
+            child: triggerBuilder?.call(selectedChild) ?? selectedChild,
           ),
         ),
         const SizedBox(width: 8),

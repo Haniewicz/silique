@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:silique/core/system_folders.dart';
 import 'package:silique/core/templates.dart';
+import 'package:silique/l10n/strings.dart';
 import 'package:silique/services/notebook.dart';
 import 'package:silique/storage/native_storage.dart';
 
@@ -193,6 +195,71 @@ void main() {
       await repo.renameFolder(vault, 'Ordinary', 'Renamed');
       expect(repo.allFolders(vault.id), contains('Renamed'));
       expect(repo.allFolders(vault.id), isNot(contains('Ordinary')));
+    },
+  );
+
+  test(
+    'an English vault seeds Templates and a language switch adds nothing',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('silique-templates-en-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final repo = Notebook(
+        storage: NativeStorage(dir.path),
+        keys: MemoryKeys(),
+        crypto: TestCrypto(),
+      );
+      addTearDown(repo.close);
+      await repo.initialize();
+      currentLanguageCode = 'en';
+      addTearDown(() => currentLanguageCode = 'pl');
+      await repo.createVault('Local');
+      final vault = repo.vaults.single;
+
+      // The seed uses the current-language name at creation time.
+      expect(repo.foldersOf(vault.id), contains('Templates'));
+
+      // Switching back to Polish must not seed a duplicate `Szablony`.
+      currentLanguageCode = 'pl';
+      await repo.ensureTemplatesFolder(vault);
+      expect(repo.foldersOf(vault.id).where((p) => p == 'Templates').length, 1);
+      expect(repo.foldersOf(vault.id), isNot(contains('Szablony')));
+    },
+  );
+
+  test(
+    'guards recognize the English Templates alias and its subtree',
+    () async {
+      final dir = Directory.systemTemp.createTempSync('silique-templates-en-');
+      addTearDown(() => dir.deleteSync(recursive: true));
+      final repo = Notebook(
+        storage: NativeStorage(dir.path),
+        keys: MemoryKeys(),
+        crypto: TestCrypto(),
+      );
+      addTearDown(repo.close);
+      await repo.initialize();
+      currentLanguageCode = 'en';
+      addTearDown(() => currentLanguageCode = 'pl');
+      await repo.createVault('Local');
+      final vault = repo.vaults.single;
+      await repo.ensureTemplatesFolder(vault);
+      await repo.createFolder(vault, 'Templates/Nested');
+
+      // The root alias is protected from deletion and renaming/moving.
+      await expectLater(
+        repo.trashFolder(vault, 'Templates'),
+        throwsA(isA<StateError>()),
+      );
+      await expectLater(
+        repo.renameFolder(vault, 'Templates', 'X'),
+        throwsA(isA<StateError>()),
+      );
+      // A subfolder under the alias is protected from renaming too.
+      await expectLater(
+        repo.renameFolder(vault, 'Templates/Nested', 'X'),
+        throwsA(isA<StateError>()),
+      );
+      expect(repo.foldersOf(vault.id), contains('Templates'));
     },
   );
 }

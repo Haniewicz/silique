@@ -110,9 +110,11 @@ void main() {
         find.byKey(const Key('note-title')),
       );
       expect(title.controller!.text, 'Remembered note');
-      expect(find.text('Ustawienia'), findsNothing);
+      // The vault badge and its sync-settings tooltip are gone; the sidebar now
+      // exposes a single settings action in the footer.
+      expect(find.byKey(const Key('sidebar-settings-nav')), findsOneWidget);
       expect(find.byTooltip('Zamknij okno'), findsNothing);
-      expect(find.byTooltip('Ustawienia synchronizacji'), findsOneWidget);
+      expect(find.byTooltip('Ustawienia synchronizacji'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       await tester.pumpAndSettle();
     },

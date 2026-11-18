@@ -23,7 +23,7 @@ import '../core/credential_mode.dart';
 import '../core/models.dart';
 import '../core/merge.dart';
 import '../core/workspace.dart';
-import '../core/templates.dart';
+import '../core/system_folders.dart';
 import 'api.dart';
 
 part 'notebook_images.dart';
@@ -1318,7 +1318,10 @@ class Notebook {
   /// [serialized] would enqueue behind the operation that is awaiting it.
   Future<void> _seedTemplatesFolder(Vault vault) async {
     if (!unlocked.containsKey(vault.id)) return;
-    if (allFolders(vault.id).contains(templatesFolder)) return;
+    // A vault already owns a templates root under any alias (`Szablony` or
+    // `Templates`): seeding is a no-op, so switching languages never adds a
+    // duplicate folder.
+    if (allFolders(vault.id).any(isTemplatesRootPath)) return;
     await _writeMeta(
       vault,
       folders: [...foldersOf(vault.id), templatesFolder],
@@ -1347,17 +1350,15 @@ class Notebook {
         folderPathError(to) ?? tr('Nieprawidłowa ścieżka.', 'Invalid path.'),
       );
     }
-    // The built-in `Szablony` folder is system-managed: renaming or moving it
+    // The built-in templates folder is system-managed: renaming or moving it
     // (or anything nested under it) would let a user strip the template status
     // and then delete the folder through the ordinary path. Guard before any
     // write, exactly like `trashFolder` guards deletion.
-    final sourceLower = source.toLowerCase();
-    if (sourceLower == templatesFolder.toLowerCase() ||
-        sourceLower.startsWith('${templatesFolder.toLowerCase()}/')) {
+    if (isTemplatesFolderPath(source)) {
       throw StateError(
         tr(
-          'Folder Szablony jest systemowy i nie można go zmienić.',
-          'The Szablony folder is built in and cannot be renamed or moved.',
+          'Folder $templatesFolder jest systemowy i nie można go zmienić.',
+          'The $templatesFolder folder is built in and cannot be renamed or moved.',
         ),
       );
     }
@@ -1417,11 +1418,11 @@ class Notebook {
     if (source == null) {
       throw FormatException(tr('Nieprawidłowa ścieżka.', 'Invalid path.'));
     }
-    if (source.toLowerCase() == templatesFolder.toLowerCase()) {
+    if (isTemplatesRootPath(source)) {
       throw StateError(
         tr(
-          'Folder Szablony jest systemowy i nie można go usunąć.',
-          'The Szablony folder is built in and cannot be deleted.',
+          'Folder $templatesFolder jest systemowy i nie można go usunąć.',
+          'The $templatesFolder folder is built in and cannot be deleted.',
         ),
       );
     }
@@ -1644,8 +1645,9 @@ class Notebook {
             : '',
         metadata: await crypto.seal(
           key,
-          // A new vault starts with the built-in `Szablony` folder so templates
-          // have a home from the first launch (no extra write after creation).
+          // A new vault starts with the built-in templates folder (named in the
+          // current UI language) so templates have a home from the first launch
+          // (no extra write after creation).
           jsonEncode({
             'name': name.trim(),
             'folders': [templatesFolder],
@@ -1982,7 +1984,7 @@ class Notebook {
               '## Dzisiaj\n\n- [ ] \n\n## Przemyślenia\n\n',
               '## Today\n\n- [ ] \n\n## Thoughts\n\n',
             ),
-      folder: journalDate == null ? folder : tr('Dziennik', 'Journal'),
+      folder: journalDate == null ? folder : journalFolder,
       journalDate: journalDate,
       updatedAt: DateTime.now().toUtc(),
     );

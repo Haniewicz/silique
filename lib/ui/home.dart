@@ -19,6 +19,7 @@ import '../core/models.dart';
 import '../core/note_sections.dart';
 import '../core/device_settings.dart';
 import '../core/templates.dart';
+import '../core/system_folders.dart';
 import '../core/shortcut_bindings.dart';
 import '../l10n/app_language.dart';
 import '../core/search.dart';
@@ -363,9 +364,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// templates and remain reachable through search and "All notes".
   List<FolderEntry> _visibleFolderEntries(List<FolderEntry> rows) {
     if (!deviceSettings.hideTemplatesFolder) return rows;
-    return rows
-        .where((entry) => !isSameOrDescendantPath(entry.path, templatesFolder))
-        .toList();
+    return rows.where((entry) => !isTemplatesFolderPath(entry.path)).toList();
   }
 
   /// Whether the active vault prefers the compact sidebar presentation.
@@ -2683,11 +2682,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   }
 
   Future<void> _folderMenu(String folder, Offset? point) async {
-    final templates = isSameOrDescendantPath(folder, templatesFolder);
+    final templates = isTemplatesFolderPath(folder);
+    final templatesRoot = isTemplatesRootPath(folder);
     final action = await _contextMenu(point, {
       'sub': () => tr('Nowy podfolder', 'New subfolder'),
       'new': () => tr('Nowa notatka', 'New note'),
-      // The built-in `Szablony` folder (and anything nested under it) is
+      // The built-in templates folder (and anything nested under it) is
       // system-managed: the UI never offers to rename or move it (the service
       // still guards as a backstop).
       if (!templates) 'rename': () => tr('Zmień nazwę', 'Rename'),
@@ -2695,9 +2695,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
       // The hidden section keeps its fixed presentation; accents are only
       // offered for the ordinary folder tree.
       if (!_inHidden) 'color': () => tr('Kolor folderu', 'Folder color'),
-      // The built-in `Szablony` folder is system-managed: the UI never offers
-      // to delete it (the service still guards as a backstop).
-      if (folder != templatesFolder)
+      // The built-in templates folder is system-managed: the UI never offers
+      // to delete its root (the service still guards as a backstop).
+      if (!templatesRoot)
         'trash': () => tr('Przenieś folder do kosza', 'Move folder to trash'),
     });
     if (action == null || !mounted) return;
@@ -3753,57 +3753,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                         : () =>
                               _runFromDrawer(mobile, () => _run(_importVault)),
                   ),
+                  _footerAction(
+                    key: const Key('sidebar-settings-nav'),
+                    label: tr('Ustawienia', 'Settings'),
+                    icon: Icons.settings_outlined,
+                    onPressed: () => _runFromDrawer(mobile, _settings),
+                  ),
                 ],
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(12),
-              child: Container(
-                padding: const EdgeInsets.all(11),
-                decoration: BoxDecoration(
-                  color: panel.withValues(alpha: .65),
-                  border: Border.all(color: line),
-                  borderRadius: BorderRadius.circular(8),
-                ),
-                child: Row(
-                  children: [
-                    Icon(
-                      vault?.protected == true
-                          ? Icons.lock_outline
-                          : Icons.cloud_outlined,
-                      color: vaultIcon,
-                      size: 20,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text(
-                            vault?.name ?? 'Vault',
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          Text(
-                            tr(
-                              '${repo.notes[_vaultId]?.values.where((n) => !n.deleted).length ?? 0} notatek • ${vault?.syncEnabled == true ? 'E2EE' : 'lokalnie'}',
-                              '${repo.notes[_vaultId]?.values.where((n) => !n.deleted).length ?? 0} notes • ${vault?.syncEnabled == true ? 'E2EE' : 'local'}',
-                            ),
-                            style: const TextStyle(fontSize: 10, color: muted),
-                          ),
-                        ],
-                      ),
-                    ),
-                    IconButton(
-                      onPressed: _settings,
-                      icon: const Icon(Icons.settings_outlined, size: 15),
-                      tooltip: tr('Ustawienia synchronizacji', 'Sync settings'),
-                    ),
-                  ],
-                ),
               ),
             ),
           ),
@@ -3910,8 +3866,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       _folderDropTarget(
                         folder: entry.path,
                         child: _folderRow(
-                          entry.name,
-                          entry.path == 'Dziennik'
+                          folderName(localizeSystemFolderPath(entry.path)),
+                          isJournalFolderPath(entry.path)
                               ? Icons.calendar_month_outlined
                               : Icons.folder_outlined,
                           depth: entry.depth,
@@ -3963,55 +3919,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     ? null
                     : () => _runFromDrawer(mobile, () => _run(_importVault)),
               ),
+              _footerAction(
+                key: const Key('sidebar-settings-nav'),
+                label: tr('Ustawienia', 'Settings'),
+                icon: Icons.settings_outlined,
+                onPressed: () => _runFromDrawer(mobile, _settings),
+              ),
             ],
-          ),
-        ),
-        Padding(
-          padding: const EdgeInsets.all(12),
-          child: Container(
-            padding: const EdgeInsets.all(11),
-            decoration: BoxDecoration(
-              color: panel.withValues(alpha: .65),
-              border: Border.all(color: line),
-              borderRadius: BorderRadius.circular(8),
-            ),
-            child: Row(
-              children: [
-                Icon(
-                  vault?.protected == true
-                      ? Icons.lock_outline
-                      : Icons.cloud_outlined,
-                  color: vaultIcon,
-                  size: 20,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        vault?.name ?? 'Vault',
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 11),
-                      ),
-                      Text(
-                        tr(
-                          '${repo.notes[_vaultId]?.values.where((n) => !n.deleted).length ?? 0} notatek • ${vault?.syncEnabled == true ? 'E2EE' : 'lokalnie'}',
-                          '${repo.notes[_vaultId]?.values.where((n) => !n.deleted).length ?? 0} notes • ${vault?.syncEnabled == true ? 'E2EE' : 'local'}',
-                        ),
-                        style: const TextStyle(fontSize: 10, color: muted),
-                      ),
-                    ],
-                  ),
-                ),
-                IconButton(
-                  onPressed: _settings,
-                  icon: const Icon(Icons.settings_outlined, size: 15),
-                  tooltip: tr('Ustawienia synchronizacji', 'Sync settings'),
-                ),
-              ],
-            ),
           ),
         ),
       ],
@@ -4276,8 +4190,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             child: _folderDropTarget(
               folder: entry.path,
               child: _folderRow(
-                entry.name,
-                entry.path == 'Dziennik'
+                folderName(localizeSystemFolderPath(entry.path)),
+                isJournalFolderPath(entry.path)
                     ? Icons.calendar_month_outlined
                     : Icons.folder_outlined,
                 depth: entry.depth,
@@ -4770,7 +4684,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     );
     if (!draggable || folderPath == null) return row;
     final feedback = _dragFeedback(
-      folderName(folderPath),
+      folderName(localizeSystemFolderPath(folderPath)),
       Icons.folder_outlined,
       tr('Przenieś folder', 'Move folder'),
       color: _folderColorOf(folderPath),
@@ -4973,8 +4887,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             child: _folderDropTarget(
               folder: entry.path,
               child: _folderRow(
-                entry.name,
-                entry.path == 'Dziennik'
+                folderName(localizeSystemFolderPath(entry.path)),
+                isJournalFolderPath(entry.path)
                     ? Icons.calendar_month_outlined
                     : Icons.folder_outlined,
                 depth: entry.depth,
@@ -5854,7 +5768,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   Widget _breadcrumbs(bool mobile) {
     final note = _noteById(_selected?.id) ?? _selected!;
-    final parts = (_inHidden ? _filterLabel('Ukryte') : note.folder)
+    final parts = (_inHidden
+            ? _filterLabel('Ukryte')
+            : localizeSystemFolderPath(note.folder))
         .split('/')
         .where((part) => part.isNotEmpty)
         .toList();

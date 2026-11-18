@@ -283,4 +283,41 @@ void main() {
       expect(normalizeFolderPath(' Projekty / Żółć '), 'Projekty/Żółć');
     },
   );
+
+  test(
+    'built-in folder names follow creation language without migration',
+    () async {
+      final previous = appLanguage.languageCode;
+      addTearDown(() => appLanguage.setLanguage(previous));
+      final directory = Directory.systemTemp.createTempSync(
+        'service-folders-language-',
+      );
+      final repo = Notebook(
+        storage: NativeStorage(directory.path),
+        keys: MemoryKeys(),
+        crypto: TestCrypto(),
+      );
+      addTearDown(() async {
+        await repo.close();
+        directory.deleteSync(recursive: true);
+      });
+      await appLanguage.setLanguage('en');
+      await repo.initialize();
+      await repo.createVault('Vault');
+      final vaultId = repo.vaults.single.id;
+
+      // A new vault seeds the current-language templates folder.
+      expect(repo.foldersOf(vaultId), contains('Templates'));
+
+      // Switching languages keeps the existing path and adds no duplicate.
+      await appLanguage.setLanguage('pl');
+      await repo.ensureTemplatesFolder(repo.vaults.single);
+      expect(repo.foldersOf(vaultId), contains('Templates'));
+      expect(repo.foldersOf(vaultId), isNot(contains('Szablony')));
+
+      // Journal entries still use the current language at creation time.
+      final journal = await repo.createNote(vaultId, journalDate: '2026-11-20');
+      expect(journal.folder, 'Dziennik');
+    },
+  );
 }

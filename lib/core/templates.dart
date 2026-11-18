@@ -1,12 +1,11 @@
 import 'models.dart';
+import 'system_folders.dart';
 import '../l10n/strings.dart' show tr;
 
-/// Folder name that turns an ordinary note into a template. A note whose
-/// `folder` equals this exact path (no subfolders) is selected by
-/// [templatesOf]; anything else is an ordinary note. Because templates are
-/// plain notes, they synchronize through the existing E2EE protocol without
-/// any server or API change and without new tables.
-const String templatesFolder = 'Szablony';
+// The templates folder (and its aliases) lives in `system_folders.dart`;
+// this file re-exports `templatesFolder` so existing imports keep working.
+export 'system_folders.dart'
+    show templatesFolder, templatesFolderAliases, isTemplatesFolderPath;
 
 /// Localized weekday name for [day] (Monday..Sunday), used for the `{{weekday}}`
 /// placeholder and any other UI that renders a day of the week.
@@ -26,11 +25,13 @@ String weekdayName(DateTime day) => switch (day.weekday) {
 /// placeholders are deliberately left untouched: the contract defines a single
 /// canonical spelling, and silently rewriting case variants would surprise
 /// users who wrote `{{Title}}` as literal text.
+/// A note in the templates folder or any of its subfolders (any depth) is a
+/// template; `deleted` and `hidden` notes stay excluded.
 List<Note> templatesOf(Iterable<Note> notes) {
   final templates = notes
       .where(
         (note) =>
-            !note.deleted && !note.hidden && note.folder == templatesFolder,
+            !note.deleted && !note.hidden && isTemplatesFolderPath(note.folder),
       )
       .toList();
   templates.sort(

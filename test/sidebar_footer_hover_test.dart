@@ -16,20 +16,25 @@ void main() {
         find.descendant(of: footer, matching: find.byType(TextButton)),
         findsNothing,
       );
-      final wells = find.descendant(
-        of: footer,
-        matching: find.byType(InkWell),
-      );
-      expect(wells, findsNWidgets(3));
+      final wells = find.descendant(of: footer, matching: find.byType(InkWell));
+      expect(wells, findsNWidgets(4));
       for (final element in wells.evaluate()) {
         final well = element.widget as InkWell;
         expect(well.borderRadius, BorderRadius.circular(6));
         expect(well.onTap, isNotNull);
       }
-      // The stable navigation key stays on the middle (hidden) action.
+      // The stable navigation key stays on the hidden action.
       expect(
         find.descendant(
           of: find.byKey(const Key('hidden-folder-nav')),
+          matching: find.byType(InkWell),
+        ),
+        findsOneWidget,
+      );
+      // The new settings action is a plain footer action too.
+      expect(
+        find.descendant(
+          of: find.byKey(const Key('sidebar-settings-nav')),
           matching: find.byType(InkWell),
         ),
         findsOneWidget,

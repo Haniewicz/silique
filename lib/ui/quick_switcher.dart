@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../core/fuzzy_match.dart';
 import '../core/models.dart';
+import '../core/system_folders.dart';
 import '../l10n/app_language.dart';
 import 'menus.dart';
 import 'theme.dart';
@@ -222,7 +223,7 @@ class _QuickSwitcherState extends State<QuickSwitcher> {
                       _title(match),
                       if (match.note.folder.isNotEmpty)
                         Text(
-                          match.note.folder,
+                          localizeSystemFolderPath(match.note.folder),
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(color: muted, fontSize: 11),

@@ -259,7 +259,7 @@ void main() {
 
     // Trashed notes disappear from the default filter and reappear in Kosz.
     expect(card(repo, 'Alfa'), findsNothing);
-    await tester.tap(find.text('Usunięte'));
+    await tester.tap(find.widgetWithText(InkWell, 'Usunięte'));
     await tester.pumpAndSettle();
     expect(card(repo, 'Alfa'), findsOneWidget);
     await ctrlTap(tester, card(repo, 'Alfa'));
@@ -742,7 +742,7 @@ void main() {
         }),
       );
       await mount(tester, repo, const Size(1380, 880));
-      await tester.tap(find.byTooltip('Ustawienia synchronizacji'));
+      await tester.tap(find.byKey(const Key('sidebar-settings-nav')));
       await tester.pumpAndSettle();
       await settleWork(tester);
       expect(repo.devices, isNotNull);

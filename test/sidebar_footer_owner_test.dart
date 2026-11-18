@@ -57,9 +57,14 @@ void main() {
       await tester.pumpAndSettle();
       final footer = find.byKey(const Key('sidebar-footer-actions'));
       expect(footer, findsOneWidget);
-      final labels = ['Usunięte', 'Ukryte', 'Importuj'].map(find.text).toList();
+      final labels = ['Usunięte', 'Ukryte', 'Importuj', 'Ustawienia']
+          .map(
+            (label) => find.descendant(of: footer, matching: find.text(label)),
+          )
+          .toList();
       expect(tester.getTopLeft(labels[0]).dy, tester.getTopLeft(labels[1]).dy);
       expect(tester.getTopLeft(labels[1]).dy, tester.getTopLeft(labels[2]).dy);
+      expect(tester.getTopLeft(labels[2]).dy, tester.getTopLeft(labels[3]).dy);
       expect(tester.takeException(), isNull);
       await tester.tap(labels[2]);
       await tester.pumpAndSettle();
@@ -142,39 +147,43 @@ void main() {
   });
   for (final language in ['pl', 'en']) {
     testWidgets(
-      'footer actions share a horizontal row above vault badge $language',
+      'footer actions share a horizontal row of four entries $language',
       (tester) async {
         final repo = await fixture(tester);
         await tester.runAsync(() => appLanguage.setLanguage(language));
         await mount(tester, repo, desktop: true);
-        final deleted = find.text(language == 'pl' ? 'Usunięte' : 'Deleted');
-        final hidden = find.text(language == 'pl' ? 'Ukryte' : 'Hidden');
-        final import = find.text(language == 'pl' ? 'Importuj' : 'Import');
+        final footer = find.byKey(const Key('sidebar-footer-actions'));
+        final deleted = find.descendant(
+          of: footer,
+          matching: find.text(language == 'pl' ? 'Usunięte' : 'Deleted'),
+        );
+        final hidden = find.descendant(
+          of: footer,
+          matching: find.text(language == 'pl' ? 'Ukryte' : 'Hidden'),
+        );
+        final import = find.descendant(
+          of: footer,
+          matching: find.text(language == 'pl' ? 'Importuj' : 'Import'),
+        );
+        final settings = find.descendant(
+          of: footer,
+          matching: find.text(language == 'pl' ? 'Ustawienia' : 'Settings'),
+        );
         expect(deleted, findsOneWidget);
         expect(hidden, findsOneWidget);
         expect(import, findsOneWidget);
+        expect(settings, findsOneWidget);
         final a = tester.getRect(deleted),
             b = tester.getRect(hidden),
-            c = tester.getRect(import);
+            c = tester.getRect(import),
+            d = tester.getRect(settings);
         // Labels may wrap with large/Ahem fonts; their first line stays aligned.
         expect(a.top, closeTo(b.top, 1));
         expect(b.top, closeTo(c.top, 1));
+        expect(c.top, closeTo(d.top, 1));
         expect(a.right, lessThan(b.left));
         expect(b.right, lessThan(c.left));
-        expect(
-          c.bottom,
-          lessThan(
-            tester
-                .getRect(
-                  find.byTooltip(
-                    language == 'pl'
-                        ? 'Ustawienia synchronizacji'
-                        : 'Sync settings',
-                  ),
-                )
-                .top,
-          ),
-        );
+        expect(c.right, lessThan(d.left));
         expect(find.text('Importuj Markdown'), findsNothing);
         expect(find.text('Import vault from folder'), findsNothing);
         await tester.tap(deleted);

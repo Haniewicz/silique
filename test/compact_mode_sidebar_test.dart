@@ -384,7 +384,7 @@ void main() {
     expect(treeList(), findsNothing);
     expect(selectMode(), findsOneWidget);
 
-    await tester.tap(find.byTooltip('Ustawienia synchronizacji'));
+    await tester.tap(find.byKey(const Key('sidebar-settings-nav')));
     await tester.pumpAndSettle();
     // The compact switch lives on the Appearance tab now.
     await tester.tap(find.byKey(const Key('settings-tab-appearance')));

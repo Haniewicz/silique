@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:silique/core/models.dart';
+import 'package:silique/core/system_folders.dart';
 import 'package:silique/core/templates.dart';
 import 'package:silique/l10n/strings.dart';
 
@@ -22,15 +23,35 @@ Note makeNote({
 
 void main() {
   group('templatesOf', () {
-    test('selects only notes directly in the templates folder', () {
+    test('selects notes in the templates folder and its subfolders', () {
       final notes = [
         makeNote(id: 'a', title: 'Meeting', folder: 'Szablony'),
         makeNote(id: 'b', title: 'Daily', folder: 'Szablony/Podfolder'),
-        makeNote(id: 'c', title: 'Note', folder: ''),
-        makeNote(id: 'd', title: 'Other', folder: 'Inne'),
+        makeNote(id: 'c', title: 'Deep', folder: 'Szablony/A/B'),
+        makeNote(id: 'd', title: 'Note', folder: ''),
+        makeNote(id: 'e', title: 'Other', folder: 'Inne'),
       ];
       final templates = templatesOf(notes);
-      expect(templates.map((n) => n.id), ['a']);
+      expect(templates.map((n) => n.id), ['b', 'c', 'a']);
+    });
+
+    test('recognizes the English alias and its subfolders', () {
+      currentLanguageCode = 'en';
+      addTearDown(() => currentLanguageCode = 'pl');
+      final notes = [
+        makeNote(id: 'a', title: 'Meeting', folder: 'Templates'),
+        makeNote(id: 'b', title: 'Daily', folder: 'Templates/Sub'),
+      ];
+      expect(templatesOf(notes).map((n) => n.id), ['b', 'a']);
+    });
+
+    test('recognizes both spellings case-insensitively', () {
+      final notes = [
+        makeNote(id: 'a', title: 'A', folder: 'SZABLONY'),
+        makeNote(id: 'b', title: 'B', folder: 'templates/x'),
+        makeNote(id: 'c', title: 'C', folder: 'Dziennik'),
+      ];
+      expect(templatesOf(notes).map((n) => n.id), ['a', 'b']);
     });
 
     test('excludes deleted and hidden notes', () {
@@ -51,6 +72,45 @@ void main() {
       ];
       final templates = templatesOf(notes);
       expect(templates.map((n) => n.title), ['Apple', 'mango', 'zebra']);
+    });
+  });
+
+  group('system folder helpers', () {
+    test('templatesFolder and journalFolder follow the current language', () {
+      addTearDown(() => currentLanguageCode = 'pl');
+      currentLanguageCode = 'pl';
+      expect(templatesFolder, 'Szablony');
+      expect(journalFolder, 'Dziennik');
+      currentLanguageCode = 'en';
+      expect(templatesFolder, 'Templates');
+      expect(journalFolder, 'Journal');
+      currentLanguageCode = 'pl';
+    });
+
+    test('journal folder aliases are recognized case-insensitively', () {
+      expect(isJournalFolderPath('Dziennik'), isTrue);
+      expect(isJournalFolderPath('Journal'), isTrue);
+      expect(isJournalFolderPath('JOURNAL'), isTrue);
+      expect(isJournalFolderPath('Dziennik/2026'), isTrue);
+      expect(isJournalFolderPath('Inne'), isFalse);
+    });
+
+    test('localizeSystemFolderPath and Name map both aliases', () {
+      currentLanguageCode = 'en';
+      addTearDown(() => currentLanguageCode = 'pl');
+      expect(localizeSystemFolderPath('Szablony/A/B'), 'Templates/A/B');
+      expect(localizeSystemFolderPath('Dziennik/2026'), 'Journal/2026');
+      expect(localizeSystemFolderPath('Inne/A'), 'Inne/A');
+      expect(localizeSystemFolderName('Szablony'), 'Templates');
+      expect(localizeSystemFolderName('Dziennik'), 'Journal');
+      expect(localizeSystemFolderName('Inne'), 'Inne');
+    });
+
+    test('templatesSubpathOf returns the path below the root', () {
+      expect(templatesSubpathOf('Szablony'), isNull);
+      expect(templatesSubpathOf('Szablony/A'), 'A');
+      expect(templatesSubpathOf('Templates/A/B'), 'A/B');
+      expect(templatesSubpathOf('Inne/A'), isNull);
     });
   });
 

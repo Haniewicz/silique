@@ -3,6 +3,7 @@ import '../l10n/app_language.dart';
 import 'package:flutter/material.dart';
 
 import '../core/workspace.dart';
+import '../core/system_folders.dart';
 import '../services/notebook.dart';
 import '../storage/vault_import.dart';
 import 'theme.dart';
@@ -186,7 +187,10 @@ class _VaultImportDialogState extends State<VaultImportDialog> {
                       for (final folder in folders)
                         SiliqueChoiceItem(
                           value: folder,
-                          child: Text(folder, overflow: TextOverflow.ellipsis),
+                          child: Text(
+                            localizeSystemFolderPath(folder),
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       SiliqueChoiceItem(
                         value: _newFolder,

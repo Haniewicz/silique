@@ -708,7 +708,7 @@ void main() {
       // Icon-only sync indicator: its readable label lives in the tooltip.
       expect(find.text('Lokalnie'), findsNothing);
       expect(find.byTooltip('Lokalnie'), findsOneWidget);
-      await tester.tap(find.byTooltip('Ustawienia synchronizacji'));
+      await tester.tap(find.byKey(const Key('sidebar-settings-nav')));
       await tester.pumpAndSettle();
       expect(requests, 1);
       // The device list lives on the account & sync tab.
@@ -718,7 +718,7 @@ void main() {
       await tester.sendKeyEvent(LogicalKeyboardKey.escape);
       await tester.pumpAndSettle();
       expect(repo.devices!.single['name'], 'Laptop testowy');
-      await tester.tap(find.byTooltip('Ustawienia synchronizacji'));
+      await tester.tap(find.byKey(const Key('sidebar-settings-nav')));
       await tester.pumpAndSettle();
       expect(requests, 2);
       await tester.tap(find.byKey(const Key('settings-tab-account')));

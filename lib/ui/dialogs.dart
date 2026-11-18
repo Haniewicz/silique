@@ -18,6 +18,7 @@ import '../core/shortcut_bindings.dart';
 import 'credential_mode_picker.dart';
 import '../core/server_trust.dart';
 import '../core/templates.dart';
+import '../core/system_folders.dart';
 import '../core/workspace.dart';
 import '../storage/native_storage.dart';
 import 'server_trust_dialogs.dart';
@@ -2080,6 +2081,9 @@ class _SettingsPanelState extends State<SettingsPanel>
     // The stored id may point at a template that no longer exists; the picker
     // shows „Brak" in that case rather than a phantom selection.
     final selectedId = templates.any((t) => t.id == currentId) ? currentId : null;
+    final selectedTemplate = selectedId == null
+        ? null
+        : templates.where((t) => t.id == selectedId).firstOrNull;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2094,17 +2098,27 @@ class _SettingsPanelState extends State<SettingsPanel>
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          tr('Domyślny szablon wpisu', 'Default entry template'),
-          style: const TextStyle(fontSize: 14),
-        ),
-        const SizedBox(height: 8),
         SiliqueChoice<String?>(
           key: const Key('journal-template-select'),
           value: selectedId,
           onChanged: vault == null ? null : (value) {
             unawaited(deviceSettings.setJournalTemplateId(value));
           },
+          decoration: InputDecoration(
+            labelText: tr(
+              'Domyślny szablon wpisu',
+              'Default entry template',
+            ),
+          ),
+          // The closed trigger stays one line: only the title, no subfolder
+          // path; the popup still shows the full item (title + relative path).
+          triggerBuilder: (child) => selectedTemplate == null
+              ? child
+              : Text(
+                  selectedTemplate.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
           items: [
             SiliqueChoiceItem<String?>(
               value: null,
@@ -2115,11 +2129,7 @@ class _SettingsPanelState extends State<SettingsPanel>
               SiliqueChoiceItem<String?>(
                 value: template.id,
                 icon: Icons.description_outlined,
-                child: Text(
-                  template.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: _templateChoiceChild(template),
               ),
           ],
         ),
@@ -2146,6 +2156,9 @@ class _SettingsPanelState extends State<SettingsPanel>
     // The stored id may point at a template that no longer exists; the picker
     // shows „Brak" in that case rather than a phantom selection.
     final selectedId = templates.any((t) => t.id == currentId) ? currentId : null;
+    final selectedTemplate = selectedId == null
+        ? null
+        : templates.where((t) => t.id == selectedId).firstOrNull;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -2160,17 +2173,27 @@ class _SettingsPanelState extends State<SettingsPanel>
           ),
         ),
         const SizedBox(height: 12),
-        Text(
-          tr('Domyślny szablon notatki', 'Default note template'),
-          style: const TextStyle(fontSize: 14),
-        ),
-        const SizedBox(height: 8),
         SiliqueChoice<String?>(
           key: const Key('note-template-select'),
           value: selectedId,
           onChanged: vault == null ? null : (value) {
             unawaited(deviceSettings.setNoteTemplateId(value));
           },
+          decoration: InputDecoration(
+            labelText: tr(
+              'Domyślny szablon notatki',
+              'Default note template',
+            ),
+          ),
+          // The closed trigger stays one line: only the title, no subfolder
+          // path; the popup still shows the full item (title + relative path).
+          triggerBuilder: (child) => selectedTemplate == null
+              ? child
+              : Text(
+                  selectedTemplate.title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
           items: [
             SiliqueChoiceItem<String?>(
               value: null,
@@ -2181,11 +2204,7 @@ class _SettingsPanelState extends State<SettingsPanel>
               SiliqueChoiceItem<String?>(
                 value: template.id,
                 icon: Icons.description_outlined,
-                child: Text(
-                  template.title,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
+                child: _templateChoiceChild(template),
               ),
           ],
         ),
@@ -2212,15 +2231,15 @@ class _SettingsPanelState extends State<SettingsPanel>
         unawaited(deviceSettings.setHideTemplatesFolder(value));
       },
       title: Text(
-        tr('Ukryj folder Szablony', 'Hide the Szablony folder'),
+        tr('Ukryj folder $templatesFolder', 'Hide the $templatesFolder folder'),
         style: const TextStyle(fontSize: 14),
       ),
       subtitle: Padding(
         padding: const EdgeInsets.only(top: 4),
         child: Text(
           tr(
-            'Folder Szablony jest wbudowany — można go ukryć w drzewie, ale nie usunąć.',
-            'The Szablony folder is built in — you can hide it from the tree, but not delete it.',
+            'Folder $templatesFolder jest wbudowany — można go ukryć w drzewie, ale nie usunąć.',
+            'The $templatesFolder folder is built in — you can hide it from the tree, but not delete it.',
           ),
           style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
         ),
@@ -2566,7 +2585,12 @@ Future<String?> chooseTargetFolder(
                   const SizedBox(height: 12),
                   if (selected.isNotEmpty &&
                       !selected.split('/').last.toLowerCase().contains(query))
-                    Text(tr('Wybrano: $selected', 'Selected: $selected')),
+                    Text(
+                      tr(
+                        'Wybrano: ${localizeSystemFolderPath(selected)}',
+                        'Selected: ${localizeSystemFolderPath(selected)}',
+                      ),
+                    ),
                   Expanded(
                     child: ListView(
                       children: [
@@ -2630,14 +2654,16 @@ Future<String?> chooseTargetFolder(
                                     : Color(folderColors[folder]!),
                               ),
                               title: Text(
-                                folder.split('/').last,
+                                folderName(localizeSystemFolderPath(folder)),
                                 style: const TextStyle(fontSize: 13),
                               ),
                               subtitle: query.isNotEmpty && folder.contains('/')
                                   ? Text(
-                                      folder.substring(
-                                        0,
-                                        folder.lastIndexOf('/'),
+                                      localizeSystemFolderPath(
+                                        folder.substring(
+                                          0,
+                                          folder.lastIndexOf('/'),
+                                        ),
                                       ),
                                     )
                                   : null,
@@ -2680,9 +2706,30 @@ Future<String?> chooseTargetFolder(
   return result;
 }
 
+/// The picker row for a template: its title plus, when it lives in a subfolder
+/// of the templates folder, the relative path as a muted second line.
+Widget _templateChoiceChild(Note template) {
+  final subpath = templatesSubpathOf(template.folder);
+  return Column(
+    crossAxisAlignment: CrossAxisAlignment.start,
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      Text(template.title, maxLines: 1, overflow: TextOverflow.ellipsis),
+      if (subpath != null)
+        Text(
+          subpath,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: const TextStyle(fontSize: 11, color: muted),
+        ),
+    ],
+  );
+}
+
 /// Chooses a template note from [templates] and returns it, or null when the
-/// user cancels. An empty list shows the "create a note in the `Szablony`
-/// folder" hint instead of an impossible selection.
+/// user cancels. An empty list shows the "create a note in the templates
+/// folder" hint instead of an impossible selection. Templates from a subfolder
+/// show their relative path as a subtitle.
 Future<Note?> chooseTemplate(
   BuildContext context, {
   required List<Note> templates,
@@ -2703,8 +2750,8 @@ Future<Note?> chooseTemplate(
                     padding: const EdgeInsets.symmetric(horizontal: 24),
                     child: Text(
                       tr(
-                        'Utwórz notatkę w folderze Szablony, aby dodać szablon.',
-                        'Create a note in the Szablony folder to add a template.',
+                        'Utwórz notatkę w folderze $templatesFolder, aby dodać szablon.',
+                        'Create a note in the $templatesFolder folder to add a template.',
                       ),
                       textAlign: TextAlign.center,
                       style: const TextStyle(color: muted),
@@ -2731,6 +2778,12 @@ Future<Note?> chooseTemplate(
                           template.title,
                           style: const TextStyle(fontSize: 13),
                         ),
+                        subtitle: templatesSubpathOf(template.folder) == null
+                            ? null
+                            : Text(
+                                templatesSubpathOf(template.folder)!,
+                                style: const TextStyle(fontSize: 11),
+                              ),
                         onTap: () => Navigator.pop(ctx, template),
                       ),
                   ],

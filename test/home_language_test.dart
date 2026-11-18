@@ -102,7 +102,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(find.text('All notes'), findsOneWidget);
       expect(find.text('Deleted'), findsOneWidget);
-      expect(find.byTooltip('Sync settings'), findsOneWidget);
+      expect(find.byKey(const Key('sidebar-settings-nav')), findsOneWidget);
       expect(find.text('Moja istniejąca notatka'), findsWidgets);
       expect(
         repo.notes[repo.vaults.single.id]!.values.single.title,
@@ -116,7 +116,7 @@ void main() {
       await tester.runAsync(() => appLanguage.setLanguage('pl'));
       await tester.pumpAndSettle();
       expect(find.text('Wszystkie notatki'), findsOneWidget);
-      expect(find.byTooltip('Ustawienia synchronizacji'), findsOneWidget);
+      expect(find.byKey(const Key('sidebar-settings-nav')), findsOneWidget);
       expect(
         tester
             .widget<TextField>(find.byKey(const Key('note-title')))

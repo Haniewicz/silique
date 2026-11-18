@@ -31,15 +31,19 @@ Future<void> openPicker(
   await tester.pumpAndSettle();
 }
 
-Note template({required String id, required String title, String body = ''}) =>
-    Note(
-      id: id,
-      vaultId: 'vault',
-      title: title,
-      body: body,
-      folder: 'Szablony',
-      updatedAt: DateTime(2026, 1, 1),
-    );
+Note template({
+  required String id,
+  required String title,
+  String body = '',
+  String folder = 'Szablony',
+}) => Note(
+  id: id,
+  vaultId: 'vault',
+  title: title,
+  body: body,
+  folder: folder,
+  updatedAt: DateTime(2026, 1, 1),
+);
 
 void main() {
   testWidgets('picker lists templates and returns the chosen one', (
@@ -56,6 +60,27 @@ void main() {
     );
     expect(find.text('Spotkanie'), findsOneWidget);
     expect(find.text('Dziennik'), findsOneWidget);
+    await tester.tap(find.byKey(const Key('template-b')));
+    await tester.pumpAndSettle();
+    expect(result?.id, 'b');
+  });
+
+  testWidgets('picker lists a subfolder template with its relative path', (
+    tester,
+  ) async {
+    Note? result;
+    await openPicker(
+      tester,
+      (value) => result = value,
+      templates: [
+        template(id: 'a', title: 'Spotkanie'),
+        template(id: 'b', title: 'Codzienny', folder: 'Szablony/Spotkania'),
+      ],
+    );
+    expect(find.text('Spotkanie'), findsOneWidget);
+    expect(find.text('Codzienny'), findsOneWidget);
+    // The subfolder path is shown as a subtitle, without changing the title.
+    expect(find.text('Spotkania'), findsOneWidget);
     await tester.tap(find.byKey(const Key('template-b')));
     await tester.pumpAndSettle();
     expect(result?.id, 'b');
