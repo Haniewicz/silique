@@ -41,8 +41,8 @@ class UpdatesPanel extends StatelessWidget {
               if (installed?.platform == 'windows')
                 Text(
                   tr(
-                    'Instalator wymaga zgody administratora (UAC: nieznany wydawca — brak podpisu Authenticode). Po zapisaniu notatek i uruchomieniu instalatora Silique zostanie zamknięte. Potwierdź instalację w jego oknie; potem uruchom aplikację ze skrótu.',
-                    'The installer requires administrator permission (UAC: unknown publisher — no Authenticode signature). Silique will close after saving notes and launching the installer. Confirm installation in its window, then launch the app from its shortcut.',
+                    'Instalator wymaga zgody administratora (UAC: nieznany wydawca — brak podpisu Authenticode); dalszy przebieg jest cichy. Po zapisaniu notatek Silique zostanie zamknięte i uruchomi się ponownie automatycznie po zakończeniu instalacji.',
+                    'The installer requires administrator permission (UAC: unknown publisher — no Authenticode signature); the rest proceeds silently. After saving notes, Silique will be closed and restart automatically once installation completes.',
                   ),
                   style: TextStyle(fontSize: 11, color: muted, height: 1.5),
                 ),

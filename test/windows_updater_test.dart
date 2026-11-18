@@ -221,6 +221,21 @@ void main() {
     },
   );
   test(
+    'a silent Windows launch announces automatic restart, never a wizard prompt',
+    () async {
+      final f = await fixture();
+      addTearDown(f.updater.dispose);
+      await f.updater.install(beforeInstall: () async {});
+      expect(f.events, ['download', 'prepare', 'native', 'commit']);
+      // The native guard relanch the notebook itself; the Dart side only says
+      // the update runs silently and restarts automatically, never to confirm
+      // an installer wizard window or reopen from the shortcut manually.
+      expect(f.updater.message, contains('uruchomi się ponownie automatycznie'));
+      expect(f.updater.message, isNot(contains('skrót')));
+      expect(f.updater.message, isNot(contains('oknie instalatora')));
+    },
+  );
+  test(
     'Windows save failure never enters native installer or closes the app',
     () async {
       final f = await fixture();

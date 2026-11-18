@@ -419,8 +419,8 @@ class AppUpdater extends ChangeNotifier {
     try {
       await _launchedWindowsHandoff!.commit();
       _message = () => tr(
-        'Uruchomiono instalator. Potwierdź instalację w jego oknie, a następnie uruchom Silique ze skrótu.',
-        'The installer has started. Confirm installation in its window, then launch Silique from its shortcut.',
+        'Instalator został uruchomiony cicho. Gdy instalacja się zakończy, Silique uruchomi się ponownie automatycznie.',
+        'The installer has started silently. When installation completes, Silique restarts automatically.',
       );
     } catch (_) {
       stage = UpdateStage.closeRequired;

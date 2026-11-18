@@ -241,7 +241,10 @@ int wmain(int argc, wchar_t** argv) {
     updater.SetLaunchForTest([&](SHELLEXECUTEINFOW* request) -> BOOL {
       called = true;
       assert(std::wstring(request->lpVerb) == L"runas");
-      assert(std::wstring(request->lpParameters).find(L"SILENT") == std::wstring::npos);
+      assert(std::wstring(request->lpParameters).find(L"/SILIQUEUPDATE=1") != std::wstring::npos);
+      assert(std::wstring(request->lpParameters).find(L"/SILENT") != std::wstring::npos);
+      assert(std::wstring(request->lpParameters).find(L"/SUPPRESSMSGBOXES") != std::wstring::npos);
+      assert(std::wstring(request->lpParameters).find(L"/DIR=") != std::wstring::npos);
       Barriers(path, root, root); // BEFORE UAC, while the callback is entered
       SetLastError(ERROR_CANCELLED); return FALSE;
     });

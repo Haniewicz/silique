@@ -23,8 +23,13 @@ struct WindowsUpdateGuard {
 };
 std::unique_ptr<WindowsUpdateLocks> LockWindowsArtifact(const std::wstring& path,
     const std::string& sha256, int64_t size);
+// [relaunch] is the absolute "{app}\silique.exe" path the guard must start
+// with its own asInvoker token after a *successful* in-app install. Empty means
+// "never relaunch": manual Setup runs do not start a guard, and the notebook is
+// never handed a relaunch path by an elevated party. See update_guard.cpp.
 std::unique_ptr<WindowsUpdateGuard> StartWindowsUpdateGuard(const std::wstring& guard,
-    WindowsUpdateLocks& locks, HANDLE parent);
+    WindowsUpdateLocks& locks, HANDLE parent,
+    const std::wstring& relaunch = {});
 std::wstring CreatePrivateUpdateDirectory();
 bool WindowsInstallIdentityMatches(const std::wstring& module,
     const std::wstring& registered, const std::wstring& program_files);
