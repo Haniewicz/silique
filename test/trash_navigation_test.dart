@@ -102,9 +102,15 @@ Future<void> navigate(WidgetTester tester, bool phone, String label) async {
     await tester.tap(find.byTooltip('Foldery i vaulty'));
     await tester.pumpAndSettle();
   }
-  final destination = phone
-      ? find.descendant(of: find.byType(Drawer), matching: find.text(label))
-      : find.text(label).first;
+  // Footer actions are icon-only now, so the trash entry is addressed by its
+  // stable key instead of a visible "Usunięte" caption.
+  final destination = switch (label) {
+    'Usunięte' => find.byKey(const Key('deleted-folder-nav')),
+    'Wszystkie notatki' => find.text(label).first,
+    _ => phone
+        ? find.descendant(of: find.byType(Drawer), matching: find.text(label))
+        : find.text(label).first,
+  };
   expect(destination, findsOneWidget);
   expect(tester.getCenter(destination).dx, lessThan(phone ? 260 : 220));
   await tester.ensureVisible(destination);

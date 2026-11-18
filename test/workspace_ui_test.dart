@@ -259,7 +259,13 @@ void main() {
 
     // Trashed notes disappear from the default filter and reappear in Kosz.
     expect(card(repo, 'Alfa'), findsNothing);
-    await tester.tap(find.widgetWithText(InkWell, 'Usunięte'));
+    // The bulk-action snackbar floats over the pinned sidebar footer, so drop
+    // it before reaching for the trash entry.
+    tester
+        .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+        .clearSnackBars();
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const Key('deleted-folder-nav')));
     await tester.pumpAndSettle();
     expect(card(repo, 'Alfa'), findsOneWidget);
     await ctrlTap(tester, card(repo, 'Alfa'));

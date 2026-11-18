@@ -127,7 +127,7 @@ void main() {
     await mount(tester, repo);
 
     // Open the note from the trash.
-    await tester.tap(find.widgetWithText(InkWell, 'Usunięte'));
+    await tester.tap(find.byKey(const Key('deleted-folder-nav')));
     await tester.pumpAndSettle();
     final note = noteByTitle(repo, 'Usunięta');
     await tester.tap(card(note));

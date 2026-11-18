@@ -328,7 +328,9 @@ void main() {
     await tester.tap(find.text('Notatki').last);
     await tester.pumpAndSettle();
     expect(repo.hiddenUnlocked, isTrue);
-    await tester.tap(find.byTooltip('Ustawienia'));
+    // Phone: the settings entry lives in the bottom navigation, not in the
+    // closed folder drawer.
+    await tester.tap(find.text('Ustawienia').last);
     await tester.pumpAndSettle();
     // The hidden-notes policies live on the storage & security tab.
     final storageTab = find.byKey(const Key('settings-tab-storage'));

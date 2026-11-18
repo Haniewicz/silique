@@ -135,13 +135,12 @@ void main() {
       await openRootNote(tester, fx.normalIds.first);
       final editorBefore = tester.getRect(titleField()).left;
 
-      Future<void> checkFilter(String? chip, String? footerLabel) async {
+      Future<void> checkFilter(String? chip, String? footerKey) async {
         if (chip != null) {
           await tester.tap(find.byKey(Key('compact-filter-$chip')));
         } else {
-          await tester.tap(
-            find.descendant(of: footer(), matching: find.text(footerLabel!)),
-          );
+          // Footer actions are icon-only now; navigate by their stable keys.
+          await tester.tap(find.byKey(Key(footerKey!)));
         }
         await tester.pumpAndSettle();
         expect(notesPanel(), findsNothing);
@@ -153,7 +152,7 @@ void main() {
 
       await checkFilter('Ostatnie', null);
       await checkFilter('Ulubione', null);
-      await checkFilter(null, 'Usunięte');
+      await checkFilter(null, 'deleted-folder-nav');
 
       expect(tester.takeException(), isNull);
       await tester.pumpWidget(const SizedBox());
@@ -182,7 +181,7 @@ void main() {
 
       // Trash → only the deleted note.
       await tester.tap(
-        find.descendant(of: footer(), matching: find.text('Usunięte')),
+        find.byKey(const Key('deleted-folder-nav')),
       );
       await tester.pumpAndSettle();
       expect(treeList(), findsOneWidget);
@@ -211,7 +210,7 @@ void main() {
       await mount(tester, fx.repo, desktop: true);
 
       await tester.tap(
-        find.descendant(of: footer(), matching: find.text('Usunięte')),
+        find.byKey(const Key('deleted-folder-nav')),
       );
       await tester.pumpAndSettle();
       expect(backRow(), findsOneWidget);
@@ -339,20 +338,17 @@ void main() {
 
       Color deletedMaterial() {
         final material = tester.widget<Material>(
-          find.ancestor(
-            of: find.descendant(
-              of: footer(),
-              matching: find.text('Usunięte'),
-            ),
-            matching: find.byType(Material),
-          ).first,
+          find
+              .descendant(
+                of: find.byKey(const Key('deleted-folder-nav')),
+                matching: find.byType(Material),
+              )
+              .first,
         );
         return material.color!;
       }
 
-      await tester.tap(
-        find.descendant(of: footer(), matching: find.text('Usunięte')),
-      );
+      await tester.tap(find.byKey(const Key('deleted-folder-nav')));
       await tester.pumpAndSettle();
       expect(deletedMaterial(), accent.withValues(alpha: .12));
 
@@ -376,7 +372,7 @@ void main() {
       await tester.tap(find.byTooltip('Foldery i vaulty'));
       await tester.pumpAndSettle();
       await tester.tap(
-        find.descendant(of: find.byType(Drawer), matching: find.text('Usunięte')),
+        find.byKey(const Key('deleted-folder-nav')),
       );
       await tester.pumpAndSettle();
 
@@ -410,7 +406,7 @@ void main() {
       await mount(tester, fx.repo, desktop: true);
 
       await tester.tap(
-        find.descendant(of: footer(), matching: find.text('Usunięte')),
+        find.byKey(const Key('deleted-folder-nav')),
       );
       await tester.pumpAndSettle();
       expect(find.byKey(const Key('note-search-field')), findsOneWidget);
@@ -461,7 +457,7 @@ void main() {
 
       await mount(tester, repo, desktop: true);
       await tester.tap(
-        find.descendant(of: footer(), matching: find.text('Usunięte')),
+        find.byKey(const Key('deleted-folder-nav')),
       );
       await tester.pumpAndSettle();
       expect(treeList(), findsOneWidget);
