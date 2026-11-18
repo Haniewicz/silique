@@ -51,6 +51,16 @@ const snackbarBg = Color(0xff353342);
 /// Icon tint for the vault cloud/lock glyph in both sidebars.
 const vaultIcon = Color(0xff81e7db);
 
+/// Unified hover background for interactive rows (folder rows, settings rows,
+/// sidebar tiles): rounded `Material` + `InkWell` draw this same overlay so a
+/// hover reads identically everywhere. Matches the default `InkWell` hover the
+/// folder rows already relied on (onSurface @ ~8%), now pinned to one token so
+/// light/dark and every screen share a single shade.
+const hover = Color(0x14ffffff);
+
+/// The corner radius of the hover surface (folder rows and settings rows).
+const hoverRadius = 6.0;
+
 /// Folder glyph tint when the folder carries no explicit accent.
 const folderIcon = Color(0xff8fa6de);
 
@@ -143,6 +153,8 @@ ThemeData siliqueTheme() => ThemeData(
   scaffoldBackgroundColor: canvas,
   dividerColor: line,
   dividerTheme: const DividerThemeData(color: line, thickness: 1),
+  hoverColor: hover,
+  splashFactory: NoSplash.splashFactory,
   colorScheme: const ColorScheme.dark(
     primary: accent,
     onPrimary: Colors.white,

@@ -3,7 +3,6 @@ import '../l10n/app_language.dart';
 import 'dart:async';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/gestures.dart';
 import 'package:flutter/services.dart';
 
 import '../services/notebook.dart';
@@ -354,10 +353,7 @@ class _HiddenPasswordDialogState extends State<_HiddenPasswordDialog> {
                 padding: const EdgeInsets.only(top: 12),
                 child: Text(
                   error!(),
-                  style: const TextStyle(
-                    color: warning,
-                    fontSize: 12,
-                  ),
+                  style: const TextStyle(color: warning, fontSize: 12),
                 ),
               ),
           ],
@@ -416,6 +412,12 @@ class SettingsPanel extends StatefulWidget {
     this.serverBase,
     this.pollInterval = const Duration(seconds: 2),
   });
+
+  /// Viewport width (in logical pixels) at or above which the settings dialog
+  /// uses the desktop two-column layout (sidebar + content); below it, the
+  /// mobile list + drill-down. Shared by desktop and mobile builds so tests can
+  /// drive the layout purely via the surface size.
+  static const double desktopBreakpoint = 760;
   final Notebook notebook;
   final VoidCallback onChanged;
 
@@ -444,8 +446,7 @@ class SettingsPanel extends StatefulWidget {
   State<SettingsPanel> createState() => _SettingsPanelState();
 }
 
-class _SettingsPanelState extends State<SettingsPanel>
-    with SingleTickerProviderStateMixin {
+class _SettingsPanelState extends State<SettingsPanel> {
   static const _generalTab = Key('settings-tab-general');
   static const _appearanceTab = Key('settings-tab-appearance');
   static const _shortcutsTab = Key('settings-tab-shortcuts');
@@ -454,36 +455,48 @@ class _SettingsPanelState extends State<SettingsPanel>
   static const _updatesTab = Key('settings-tab-updates');
   static const _updatesTabIndex = 5;
 
+  /// A single settings section: its navigation key, sidebar/list icon and
+  /// localized label. The order is the navigation order of the sections.
+  List<_SectionSpec> get _sections => [
+    _SectionSpec(_generalTab, Icons.tune, tr('Ogólne', 'General')),
+    _SectionSpec(
+      _appearanceTab,
+      Icons.palette_outlined,
+      tr('Wygląd', 'Appearance'),
+    ),
+    _SectionSpec(
+      _shortcutsTab,
+      Icons.keyboard_outlined,
+      tr('Skróty', 'Shortcuts'),
+    ),
+    _SectionSpec(
+      _accountTab,
+      Icons.cloud_outlined,
+      tr('Konto i synchronizacja', 'Account & sync'),
+    ),
+    _SectionSpec(
+      _storageTab,
+      Icons.storage_outlined,
+      tr('Pamięć i bezpieczeństwo', 'Storage & security'),
+    ),
+    _SectionSpec(_updatesTab, Icons.update, tr('Aktualizacje', 'Updates')),
+  ];
+
   final server = TextEditingController(),
       email = TextEditingController(),
       password = TextEditingController(),
       recovery = TextEditingController();
-  late final TabController _tabs = TabController(
-    length: 6,
-    vsync: this,
-    // The update snackbar action must land on the updates tab immediately;
-    // no post-frame scroll reveal is needed inside a dedicated tab.
-    initialIndex: widget.openUpdates ? _updatesTabIndex : 0,
-  );
-  final TabBarScrollController _tabScroll = TabBarScrollController();
 
-  void _onTabBarPointerSignal(PointerSignalEvent event) {
-    // A mouse wheel over a horizontal scrollable only forwards scrollDelta.dx
-    // by default (see Scrollable._pointerSignalEventDelta), so the vertical
-    // wheel — the only axis a physical mouse offers — never reaches the tabs.
-    // Re-route both axes onto the bar's own scroll controller, and only while
-    // the pointer is over the bar (the Listener is scoped to the TabBar), so
-    // the dialog's tab content below is never scrolled by the same gesture.
-    if (event is! PointerScrollEvent) return;
-    if (!_tabScroll.hasClients) return;
-    final position = _tabScroll.position;
-    final delta = event.scrollDelta.dy == 0 ? event.scrollDelta.dx : event.scrollDelta.dy;
-    final target = (position.pixels - delta).clamp(
-      position.minScrollExtent,
-      position.maxScrollExtent,
-    );
-    if (target != position.pixels) position.jumpTo(target);
-  }
+  /// The currently selected section index (`0..5`). Replaces the `TabBar` a
+  /// `TabController` used to drive; the value is read from the sidebar (desktop)
+  /// or the section list (mobile) instead of a tab strip.
+  late int _section = widget.openUpdates ? _updatesTabIndex : 0;
+
+  /// On mobile the open section index while a section is drilled into, or
+  /// `null` while the section list is showing. `openUpdates` starts drilled
+  /// into the updates section so the snackbar action lands there directly.
+  late int? _mobileSection = widget.openUpdates ? _updatesTabIndex : null;
+
   bool register = false, busy = false;
   String? error;
   String Function()? message;
@@ -513,8 +526,9 @@ class _SettingsPanelState extends State<SettingsPanel>
   Notebook get repo => widget.notebook;
 
   /// The normalized base of the signed-in server, or null when signed out.
-  Uri? get _trustBase =>
-      repo.session == null ? null : SiliqueApi.validateServer(repo.session!.server);
+  Uri? get _trustBase => repo.session == null
+      ? null
+      : SiliqueApi.validateServer(repo.session!.server);
   @override
   void initState() {
     super.initState();
@@ -533,8 +547,6 @@ class _SettingsPanelState extends State<SettingsPanel>
     _pollTimer?.cancel();
     appLanguage.removeListener(_languageChanged);
     deviceSettings.removeListener(_languageChanged);
-    _tabScroll.dispose();
-    _tabs.dispose();
     for (final c in [server, email, password, recovery]) {
       c.dispose();
     }
@@ -561,8 +573,7 @@ class _SettingsPanelState extends State<SettingsPanel>
       v.owner != null && vaultOwnerUserId(v.owner) != repo.session?.userId;
 
   bool _tombstoned(Vault v) => repo.syncIssues.any(
-    (issue) =>
-        issue.vaultId == v.id && issue.reason == SyncIssue.tombstoned,
+    (issue) => issue.vaultId == v.id && issue.reason == SyncIssue.tombstoned,
   );
 
   /// The tile subtitle for the "SYNCED VAULTS" switch. Ownership is provenance,
@@ -736,11 +747,13 @@ class _SettingsPanelState extends State<SettingsPanel>
       );
     }
   });
-  Future<void> refreshPairing() => run(() => _serverAction(() async {
-    pairingRequests = await repo.pairings();
-    await repo.refreshDevices();
-    await _processPairing();
-  }));
+  Future<void> refreshPairing() => run(
+    () => _serverAction(() async {
+      pairingRequests = await repo.pairings();
+      await repo.refreshDevices();
+      await _processPairing();
+    }),
+  );
 
   /// The new-device pairing state machine, shared by the silent poll and the
   /// manual "Odśwież parowanie" fallback (and the reverse device-only refresh).
@@ -820,87 +833,89 @@ class _SettingsPanelState extends State<SettingsPanel>
     }
   }
 
-  Future<void> approve(Json request) => run(() => _serverAction(() async {
-    final offered = request['approverId'] == null
-        ? await repo.offerPairing(request)
-        : request;
-    final code = (await repo.pairingDetails(offered)).code;
-    if (!mounted) return;
-    var compared = false;
-    final confirmed = await showDialog<bool>(
-      context: context,
-      barrierDismissible: false,
-      builder: (ctx) => ListenableBuilder(
-        listenable: appLanguage,
-        builder: (ctx, _) => StatefulBuilder(
-          builder: (ctx, setState) => AlertDialog(
-            title: Text(
-              tr(
-                'Porównaj kody na obu urządzeniach',
-                'Compare the codes on both devices',
+  Future<void> approve(Json request) => run(
+    () => _serverAction(() async {
+      final offered = request['approverId'] == null
+          ? await repo.offerPairing(request)
+          : request;
+      final code = (await repo.pairingDetails(offered)).code;
+      if (!mounted) return;
+      var compared = false;
+      final confirmed = await showDialog<bool>(
+        context: context,
+        barrierDismissible: false,
+        builder: (ctx) => ListenableBuilder(
+          listenable: appLanguage,
+          builder: (ctx, _) => StatefulBuilder(
+            builder: (ctx, setState) => AlertDialog(
+              title: Text(
+                tr(
+                  'Porównaj kody na obu urządzeniach',
+                  'Compare the codes on both devices',
+                ),
               ),
-            ),
-            content: SizedBox(
-              width: 440,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    tr(
-                      'Nowe urządzenie pokazuje ten sam kod automatycznie. Oba urządzenia muszą wyświetlać dokładnie ten sam pełny kod. Dopiero wtedy udostępnij klucz konta.',
-                      'The new device shows the same code automatically. Both devices must display exactly the same full code. Only then share the account key.',
-                    ),
-                  ),
-                  const SizedBox(height: 20),
-                  SelectableText(
-                    code,
-                    contextMenuBuilder: siliqueTextContextMenu,
-                    style: const TextStyle(
-                      fontFamily: kMonoFontFamily,
-                      fontFamilyFallback: ['monospace'],
-                      fontSize: 20,
-                      color: accent,
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  CheckboxListTile(
-                    contentPadding: EdgeInsets.zero,
-                    value: compared,
-                    onChanged: (v) => setState(() => compared = v ?? false),
-                    title: Text(
+              content: SizedBox(
+                width: 440,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
                       tr(
-                        'Porównałem pełny kod — jest identyczny',
-                        'I have compared the full code — it is identical',
+                        'Nowe urządzenie pokazuje ten sam kod automatycznie. Oba urządzenia muszą wyświetlać dokładnie ten sam pełny kod. Dopiero wtedy udostępnij klucz konta.',
+                        'The new device shows the same code automatically. Both devices must display exactly the same full code. Only then share the account key.',
                       ),
-                      style: TextStyle(fontSize: 12),
                     ),
-                  ),
-                ],
+                    const SizedBox(height: 20),
+                    SelectableText(
+                      code,
+                      contextMenuBuilder: siliqueTextContextMenu,
+                      style: const TextStyle(
+                        fontFamily: kMonoFontFamily,
+                        fontFamilyFallback: ['monospace'],
+                        fontSize: 20,
+                        color: accent,
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+                    CheckboxListTile(
+                      contentPadding: EdgeInsets.zero,
+                      value: compared,
+                      onChanged: (v) => setState(() => compared = v ?? false),
+                      title: Text(
+                        tr(
+                          'Porównałem pełny kod — jest identyczny',
+                          'I have compared the full code — it is identical',
+                        ),
+                        style: TextStyle(fontSize: 12),
+                      ),
+                    ),
+                  ],
+                ),
               ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(ctx, false),
+                  child: Text(tr('Anuluj', 'Cancel')),
+                ),
+                FilledButton(
+                  onPressed: compared ? () => Navigator.pop(ctx, true) : null,
+                  child: Text(tr('Zatwierdź urządzenie', 'Approve device')),
+                ),
+              ],
             ),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(ctx, false),
-                child: Text(tr('Anuluj', 'Cancel')),
-              ),
-              FilledButton(
-                onPressed: compared ? () => Navigator.pop(ctx, true) : null,
-                child: Text(tr('Zatwierdź urządzenie', 'Approve device')),
-              ),
-            ],
           ),
         ),
-      ),
-    );
-    if (confirmed == true) {
-      await repo.approvePairing(offered);
-      message = () => tr(
-        'Klucz przekazany w zaszyfrowanej kopercie. Nowe urządzenie dokończy parowanie automatycznie.',
-        'Key sent in an encrypted envelope. The new device will finish pairing automatically.',
       );
-    }
-  }));
+      if (confirmed == true) {
+        await repo.approvePairing(offered);
+        message = () => tr(
+          'Klucz przekazany w zaszyfrowanej kopercie. Nowe urządzenie dokończy parowanie automatycznie.',
+          'Key sent in an encrypted envelope. The new device will finish pairing automatically.',
+        );
+      }
+    }),
+  );
   Widget pairingSection() => Column(
     crossAxisAlignment: CrossAxisAlignment.start,
     children: [
@@ -955,7 +970,9 @@ class _SettingsPanelState extends State<SettingsPanel>
           ),
         ],
         TextButton(
-          onPressed: busy ? null : () => run(() => _serverAction(repo.startPairing)),
+          onPressed: busy
+              ? null
+              : () => run(() => _serverAction(repo.startPairing)),
           child: Text(
             tr(
               'Rozpocznij parowanie ponownie (ważne 10 minut)',
@@ -978,12 +995,15 @@ class _SettingsPanelState extends State<SettingsPanel>
         TextButton(
           onPressed: busy
               ? null
-              : () => run(() => _serverAction(() async {
-                  await repo.recoverAccount(recovery.text);
-                  recovery.clear();
-                  await repo.sync();
-                  message = () => tr('Konto odblokowane.', 'Account unlocked.');
-                })),
+              : () => run(
+                  () => _serverAction(() async {
+                    await repo.recoverAccount(recovery.text);
+                    recovery.clear();
+                    await repo.sync();
+                    message = () =>
+                        tr('Konto odblokowane.', 'Account unlocked.');
+                  }),
+                ),
           child: Text(
             tr('Odblokuj kluczem odzyskiwania', 'Unlock with recovery key'),
           ),
@@ -1267,541 +1287,623 @@ class _SettingsPanelState extends State<SettingsPanel>
   @override
   Widget build(BuildContext context) {
     Localizations.localeOf(context);
-    return ConstrainedBox(
-      constraints: const BoxConstraints(maxWidth: 620, maxHeight: 780),
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(24, 18, 12, 10),
+    // Choose the layout from the space the panel actually got, not from the
+    // window: a modal can be laid out narrower than the window (inset padding,
+    // a centered dialog, a test surface). The desktop breakpoint then matches
+    // what the two-column layout really has to work with.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final media = MediaQuery.sizeOf(context);
+        final width = constraints.hasBoundedWidth
+            ? constraints.maxWidth
+            : media.width;
+        final height = constraints.hasBoundedHeight
+            ? constraints.maxHeight
+            : media.height;
+        final desktop = width >= SettingsPanel.desktopBreakpoint;
+        // On desktop the settings dialog widens to a roomy two-column layout; on
+        // mobile it keeps the compact single-column list / drill-down. The height
+        // mirror: 86% of the window, clamped to a sensible minimum so a short
+        // window still shows a usable panel.
+        final maxWidth = desktop ? (width - 64).clamp(720.0, 1180.0) : 620.0;
+        final maxHeight = desktop ? height * 0.86 : 780.0;
+        return ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: maxWidth, maxHeight: maxHeight),
+          // Fill the available width: a bare Column would shrink-wrap to its widest
+          // intrinsic child (the header row) when the parent gives loose width.
+          child: SizedBox(
+            width: double.infinity,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(24, 18, 12, 10),
+                  child: Row(
+                    children: [
+                      const Icon(Icons.settings_outlined, color: accent),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          tr('Ustawienia', 'Settings'),
+                          style: TextStyle(
+                            fontSize: 22,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                      IconButton(
+                        onPressed: busy ? null : () => Navigator.pop(context),
+                        icon: const Icon(Icons.close),
+                        tooltip: tr('Zamknij', 'Close'),
+                      ),
+                    ],
+                  ),
+                ),
+                const Divider(height: 1),
+                Flexible(child: desktop ? _desktopLayout() : _mobileLayout()),
+                // Operation feedback stays visible under the sections no matter which
+                // section the running action belongs to.
+                if (error != null || message != null || busy)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        if (error != null)
+                          SelectableText(
+                            error!,
+                            contextMenuBuilder: siliqueTextContextMenu,
+                            style: const TextStyle(color: warning),
+                          ),
+                        if (message != null)
+                          Padding(
+                            padding: const EdgeInsets.only(top: 12),
+                            child: Text(
+                              message!(),
+                              style: const TextStyle(color: success),
+                            ),
+                          ),
+                        if (busy)
+                          const Padding(
+                            padding: EdgeInsets.only(top: 14),
+                            child: LinearProgressIndicator(minHeight: 2),
+                          ),
+                      ],
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  /// The six section pages, one per navigation entry. Kept as a single list so
+  /// the desktop sidebar (`IndexedStack`) and the mobile drill-down render the
+  /// exact same content; `_SettingsTabPage` keeps each page's scroll offset and
+  /// field state alive across section switches, exactly as the `TabBarView`
+  /// pages did before.
+  List<Widget> _pages() => [
+    _SettingsTabPage(
+      children: [
+        const LanguagePicker(),
+        _journalTemplateTile(),
+        _noteTemplateTile(),
+        _templatesFolderTile(),
+      ],
+    ),
+    _SettingsTabPage(
+      children: [
+        Text(
+          tr('KOLORY', 'COLORS'),
+          style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
+        ),
+        const SizedBox(height: 8),
+        _defaultNoteColorTile(),
+        _defaultFolderColorTile(),
+        const SizedBox(height: 24),
+        _compactModeTile(),
+      ],
+    ),
+    _SettingsTabPage(children: [_shortcutsSection()]),
+    _SettingsTabPage(
+      children: [
+        Text(
+          tr('TWÓJ SERWER', 'YOUR SERVER'),
+          style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
+        ),
+        const SizedBox(height: 12),
+        if (repo.session == null) ...[
+          Text(
+            tr('Synchronizuj na własnych zasadach', 'Sync on your own terms'),
+            style: TextStyle(fontSize: 20, fontWeight: FontWeight.w600),
+          ),
+          const SizedBox(height: 8),
+          Text(
+            tr(
+              'Notatki opuszczają urządzenie dopiero po zaszyfrowaniu. Hasło logowania i klucz odzyskiwania pełnią różne funkcje.',
+              'Notes leave your device only after encryption. Your sign-in password and recovery key serve different purposes.',
+            ),
+            style: TextStyle(color: muted),
+          ),
+          const SizedBox(height: 20),
+          TextField(
+            contextMenuBuilder: siliqueTextContextMenu,
+            controller: server,
+            keyboardType: TextInputType.url,
+            decoration: InputDecoration(
+              labelText: tr('Adres serwera', 'Server address'),
+              hintText: 'https://notes.example.com',
+            ),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            contextMenuBuilder: siliqueTextContextMenu,
+            controller: email,
+            keyboardType: TextInputType.emailAddress,
+            decoration: InputDecoration(labelText: tr('E-mail', 'Email')),
+          ),
+          const SizedBox(height: 14),
+          TextField(
+            contextMenuBuilder: siliqueTextContextMenu,
+            controller: password,
+            obscureText: true,
+            decoration: InputDecoration(
+              labelText: tr(
+                'Hasło logowania (min. 12 znaków)',
+                'Sign-in password (at least 12 characters)',
+              ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          if (!register)
+            TextField(
+              contextMenuBuilder: siliqueTextContextMenu,
+              controller: recovery,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: tr(
+                  'Klucz odzyskiwania konta',
+                  'Account recovery key',
+                ),
+                hintText: tr(
+                  'Wymagany na nowym urządzeniu',
+                  'Required on a new device',
+                ),
+              ),
+            ),
+          const SizedBox(height: 16),
+          OverflowBar(
+            spacing: 8,
+            overflowSpacing: 8,
+            overflowAlignment: OverflowBarAlignment.start,
+            children: [
+              FilledButton(
+                onPressed: busy ? null : connect,
+                child: Text(
+                  register
+                      ? tr('Utwórz konto', 'Create account')
+                      : tr('Połącz konto', 'Connect account'),
+                ),
+              ),
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => setState(() => register = !register),
+                child: Text(
+                  register
+                      ? tr('Mam konto', 'I have an account')
+                      : tr('Rejestracja', 'Register'),
+                ),
+              ),
+            ],
+          ),
+        ] else ...[
+          Container(
+            padding: const EdgeInsets.all(16),
+            decoration: BoxDecoration(
+              color: sidebar,
+              border: Border.all(color: line),
+              borderRadius: BorderRadius.circular(10),
+            ),
             child: Row(
               children: [
-                const Icon(Icons.settings_outlined, color: accent),
+                const Icon(Icons.cloud_done_outlined, color: success),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(repo.session!.email),
+                      Text(
+                        repo.session!.server,
+                        style: const TextStyle(color: muted, fontSize: 11),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(height: 12),
+          TextButton.icon(
+            onPressed: busy
+                ? null
+                : () => run(() async {
+                    await repo.disconnect();
+                    devices = null;
+                    _untrustedCert = null;
+                  }),
+            icon: const Icon(Icons.logout, size: 17),
+            label: Text(tr('Wyloguj konto', 'Sign out')),
+          ),
+          if (_untrustedCert != null) ...[
+            const SizedBox(height: 12),
+            _untrustedServerBlock(),
+          ],
+          pairingSection(),
+          const SizedBox(height: 20),
+          Text(
+            tr('SYNCHRONIZOWANE VAULTY', 'SYNCED VAULTS'),
+            style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
+          ),
+          const SizedBox(height: 8),
+          for (final v in repo.vaults)
+            SwitchListTile(
+              contentPadding: EdgeInsets.zero,
+              value: v.syncEnabled,
+              onChanged: busy
+                  ? null
+                  : (enabled) => run(
+                      () => _serverAction(() async {
+                        if (enabled) {
+                          await repo.enableSync(v);
+                          await repo.sync();
+                        } else {
+                          v.syncEnabled = false;
+                          repo.storage.putVault(v);
+                        }
+                      }),
+                    ),
+              title: Text(v.name, style: const TextStyle(fontSize: 14)),
+              subtitle: _vaultSyncSubtitle(v),
+            ),
+          const SizedBox(height: 20),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  tr('URZĄDZENIA', 'DEVICES'),
+                  style: TextStyle(
+                    fontSize: 11,
+                    letterSpacing: 1.3,
+                    color: muted,
+                  ),
+                ),
+              ),
+              TextButton(
+                onPressed: busy
+                    ? null
+                    : () => run(() => _serverAction(repo.refreshDevices)),
+                child: Text(tr('Odśwież', 'Refresh')),
+              ),
+            ],
+          ),
+          if (devices != null)
+            for (final device in devices!)
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: const Icon(Icons.devices_outlined),
+                title: Text(
+                  '${device['name']}${device['id'] == repo.deviceId ? tr(' (to urządzenie)', ' (this device)') : ''}',
+                  style: const TextStyle(fontSize: 13),
+                ),
+                subtitle: Text(
+                  '${(device['id'] as String).substring(0, 8)} • ${device['revoked'] == 1 ? tr('dostęp cofnięty', 'access revoked') : tr('aktywne', 'active')}',
+                  style: const TextStyle(fontSize: 11),
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (device['revoked'] != 1 && device['id'] == repo.deviceId)
+                      IconButton(
+                        key: const Key('device-rename'),
+                        tooltip: tr(
+                          'Zmień nazwę tego urządzenia',
+                          'Rename this device',
+                        ),
+                        icon: const Icon(Icons.edit_outlined, size: 18),
+                        onPressed: busy
+                            ? null
+                            : () async {
+                                final name = await askText(
+                                  context,
+                                  '',
+                                  titleBuilder: () => tr(
+                                    'Nazwa tego urządzenia',
+                                    'This device’s name',
+                                  ),
+                                  initial: device['name'] as String? ?? '',
+                                  hintBuilder: () =>
+                                      tr('1–80 znaków', '1–80 characters'),
+                                );
+                                if (name == null) return;
+                                await run(
+                                  () => _serverAction(() async {
+                                    final saved = await repo.renameDevice(
+                                      device['id'] as String,
+                                      name,
+                                    );
+                                    await repo.refreshDevices();
+                                    message = () => tr(
+                                      'Nazwa urządzenia zapisana na serwerze: $saved',
+                                      'Device name saved on the server: $saved',
+                                    );
+                                  }),
+                                );
+                              },
+                      ),
+                    if (device['revoked'] != 1)
+                      IconButton(
+                        tooltip: tr('Cofnij dostęp', 'Revoke access'),
+                        icon: const Icon(Icons.block, size: 18),
+                        onPressed: busy
+                            ? null
+                            : () => run(
+                                () => _serverAction(() async {
+                                  final confirmed = await showDialog<bool>(
+                                    context: context,
+                                    builder: (ctx) => ListenableBuilder(
+                                      listenable: appLanguage,
+                                      builder: (ctx, _) => AlertDialog(
+                                        title: Text(
+                                          tr(
+                                            'Cofnąć dostęp urządzeniu?',
+                                            'Revoke device access?',
+                                          ),
+                                        ),
+                                        content: Text(
+                                          tr(
+                                            'Urządzenie utraci synchronizację. Wcześniej pobrane dane pozostaną na nim.',
+                                            'The device will lose sync access. Previously downloaded data will remain on it.',
+                                          ),
+                                        ),
+                                        actions: [
+                                          TextButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, false),
+                                            child: Text(tr('Anuluj', 'Cancel')),
+                                          ),
+                                          FilledButton(
+                                            onPressed: () =>
+                                                Navigator.pop(ctx, true),
+                                            child: Text(
+                                              tr(
+                                                'Cofnij dostęp',
+                                                'Revoke access',
+                                              ),
+                                            ),
+                                          ),
+                                        ],
+                                      ),
+                                    ),
+                                  );
+                                  if (confirmed != true) return;
+                                  await repo.api!.request(
+                                    'DELETE',
+                                    '/v1/devices/${device['id']}',
+                                  );
+                                  if (device['id'] == repo.deviceId) {
+                                    await repo.disconnect();
+                                    devices = null;
+                                  } else {
+                                    devices = devices
+                                        ?.where(
+                                          (entry) =>
+                                              entry['id'] != device['id'],
+                                        )
+                                        .toList();
+                                  }
+                                }),
+                              ),
+                      ),
+                  ],
+                ),
+              ),
+        ],
+      ],
+    ),
+    _SettingsTabPage(
+      children: [
+        if (credentialControl case final control?) credentialSection(control),
+        hiddenSection(),
+        const SizedBox(height: 28),
+        const Divider(),
+        const SizedBox(height: 14),
+        Text(
+          tr('MIEJSCE DANYCH', 'DATA LOCATION'),
+          style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
+        ),
+        const SizedBox(height: 8),
+        SelectableText(
+          repo.dataLocation,
+          contextMenuBuilder: siliqueTextContextMenu,
+          key: const Key('data-location'),
+          style: const TextStyle(fontSize: 11, color: muted),
+        ),
+        if (widget.onMoveStorage != null)
+          TextButton.icon(
+            key: const Key('move-storage-settings'),
+            onPressed: busy ? null : widget.onMoveStorage,
+            icon: const Icon(Icons.drive_file_move_outlined, size: 18),
+            label: Text(tr('Zmień miejsce zapisu', 'Change storage location')),
+          ),
+        if (NativeStorage.defaultLocationWarning != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              NativeStorage.defaultLocationWarning!,
+              key: const Key('data-location-warning'),
+              style: const TextStyle(fontSize: 11, color: warning),
+            ),
+          ),
+        if (widget.serverTrust != null && widget.serverBase != null)
+          TrustedServerCertSection(
+            trust: widget.serverTrust!,
+            base: widget.serverBase!,
+            onChanged: widget.onChanged,
+          ),
+      ],
+    ),
+    _SettingsTabPage(
+      children: [
+        if (widget.updater != null)
+          KeyedSubtree(
+            key: const Key('updates-section'),
+            child: UpdatesPanel(
+              updater: widget.updater!,
+              beforeInstall: widget.beforeUpdate ?? () async {},
+            ),
+          ),
+      ],
+    ),
+  ];
+
+  /// Desktop right/left split: a section sidebar on the left, the selected
+  /// section's page on the right. All six pages stay mounted inside an
+  /// [IndexedStack] so field state and scroll offsets survive section switches.
+  Widget _desktopLayout() {
+    final pages = _pages();
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        SizedBox(width: 220, child: _sectionSidebar()),
+        const VerticalDivider(width: 1),
+        Expanded(
+          child: IndexedStack(index: _section, children: pages),
+        ),
+      ],
+    );
+  }
+
+  /// The desktop navigation rail: icon + label for each section, drawn with the
+  /// same rounded `Material` + `InkWell` hover surface as folder rows.
+  Widget _sectionSidebar() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      children: [
+        for (var i = 0; i < _sections.length; i++)
+          _sectionTile(i, trailing: false),
+      ],
+    );
+  }
+
+  /// The mobile section list: a tile per section (icon, name, chevron). Tapping
+  /// opens the section in a drill-down view instead of swapping panes.
+  Widget _mobileList() {
+    return ListView(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      children: [
+        for (var i = 0; i < _sections.length; i++)
+          _sectionTile(i, trailing: true),
+      ],
+    );
+  }
+
+  /// Mobile: either the section list or, once a section is open, that section's
+  /// content with a back header that returns to the list (never closing the
+  /// dialog).
+  Widget _mobileLayout() {
+    // When opened via the update snackbar action, drill straight into Updates.
+    if (_mobileSection == null) return _mobileList();
+    final pages = _pages();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        _mobileBackHeader(),
+        const Divider(height: 1),
+        Expanded(
+          child: IndexedStack(index: _mobileSection!, children: pages),
+        ),
+      ],
+    );
+  }
+
+  /// Back header above a drilled-in mobile section. Returns to the list view;
+  /// the dialog itself stays open.
+  Widget _mobileBackHeader() {
+    final spec = _sections[_mobileSection!];
+    return Material(
+      color: Colors.transparent,
+      borderRadius: BorderRadius.circular(hoverRadius),
+      child: InkWell(
+        key: const Key('settings-back-to-list'),
+        borderRadius: BorderRadius.circular(hoverRadius),
+        onTap: () => setState(() => _mobileSection = null),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          child: Row(
+            children: [
+              const Icon(Icons.arrow_back, size: 18),
+              const SizedBox(width: 8),
+              Icon(spec.icon, size: 18),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  spec.label,
+                  style: const TextStyle(
+                    fontSize: 14,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// One section tile: rounded `Material` + `InkWell` with the shared [hover]
+  /// token, mirroring the folder-row hover. [trailing] adds the chevron used by
+  /// the mobile list; the desktop sidebar omits it.
+  Widget _sectionTile(int index, {required bool trailing}) {
+    final spec = _sections[index];
+    final selected = index == _section;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Material(
+        key: spec.key,
+        color: selected ? accent.withValues(alpha: .10) : Colors.transparent,
+        borderRadius: BorderRadius.circular(hoverRadius),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(hoverRadius),
+          onTap: () => setState(() {
+            _section = index;
+            _mobileSection = index;
+          }),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+            child: Row(
+              children: [
+                Icon(spec.icon, size: 19, color: selected ? accent : muted),
                 const SizedBox(width: 12),
                 Expanded(
                   child: Text(
-                    tr('Ustawienia', 'Settings'),
-                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.w600),
+                    spec.label,
+                    style: TextStyle(
+                      fontSize: 13,
+                      color: selected ? Colors.white : textSecondary,
+                    ),
                   ),
                 ),
-                IconButton(
-                  onPressed: busy ? null : () => Navigator.pop(context),
-                  icon: const Icon(Icons.close),
-                  tooltip: tr('Zamknij', 'Close'),
-                ),
+                if (trailing) const Icon(Icons.chevron_right, size: 18),
               ],
             ),
           ),
-          const Divider(height: 1),
-          Listener(
-            onPointerSignal: _onTabBarPointerSignal,
-            child: ScrollConfiguration(
-              behavior: ScrollConfiguration.of(context).copyWith(
-                dragDevices: {...ScrollConfiguration.of(context).dragDevices, PointerDeviceKind.mouse},
-              ),
-              child: TabBar(
-                controller: _tabs,
-                scrollController: _tabScroll,
-                isScrollable: true,
-                tabAlignment: TabAlignment.start,
-                tabs: [
-                  Tab(key: _generalTab, text: tr('Ogólne', 'General')),
-                  Tab(key: _appearanceTab, text: tr('Wygląd', 'Appearance')),
-                  Tab(key: _shortcutsTab, text: tr('Skróty', 'Shortcuts')),
-                  Tab(
-                    key: _accountTab,
-                    text: tr('Konto i synchronizacja', 'Account & sync'),
-                  ),
-                  Tab(
-                    key: _storageTab,
-                    text: tr('Pamięć i bezpieczeństwo', 'Storage & security'),
-                  ),
-                  Tab(key: _updatesTab, text: tr('Aktualizacje', 'Updates')),
-                ],
-              ),
-            ),
-          ),
-          const Divider(height: 1),
-          Flexible(
-            child: TabBarView(
-              controller: _tabs,
-              children: [
-                _SettingsTabPage(
-                  children: [
-                    const LanguagePicker(),
-                    _journalTemplateTile(),
-                    _noteTemplateTile(),
-                    _templatesFolderTile(),
-                  ],
-                ),
-                _SettingsTabPage(
-                  children: [
-                    Text(
-                      tr('KOLORY', 'COLORS'),
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.3,
-                        color: muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    _defaultNoteColorTile(),
-                    _defaultFolderColorTile(),
-                    const SizedBox(height: 24),
-                    _compactModeTile(),
-                  ],
-                ),
-                _SettingsTabPage(children: [_shortcutsSection()]),
-                _SettingsTabPage(
-                  children: [
-                    Text(
-                      tr('TWÓJ SERWER', 'YOUR SERVER'),
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.3,
-                        color: muted,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    if (repo.session == null) ...[
-                      Text(
-                        tr(
-                          'Synchronizuj na własnych zasadach',
-                          'Sync on your own terms',
-                        ),
-                        style: TextStyle(
-                          fontSize: 20,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      Text(
-                        tr(
-                          'Notatki opuszczają urządzenie dopiero po zaszyfrowaniu. Hasło logowania i klucz odzyskiwania pełnią różne funkcje.',
-                          'Notes leave your device only after encryption. Your sign-in password and recovery key serve different purposes.',
-                        ),
-                        style: TextStyle(color: muted),
-                      ),
-                      const SizedBox(height: 20),
-                      TextField(
-                        contextMenuBuilder: siliqueTextContextMenu,
-                        controller: server,
-                        keyboardType: TextInputType.url,
-                        decoration: InputDecoration(
-                          labelText: tr('Adres serwera', 'Server address'),
-                          hintText: 'https://notes.example.com',
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        contextMenuBuilder: siliqueTextContextMenu,
-                        controller: email,
-                        keyboardType: TextInputType.emailAddress,
-                        decoration: InputDecoration(
-                          labelText: tr('E-mail', 'Email'),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      TextField(
-                        contextMenuBuilder: siliqueTextContextMenu,
-                        controller: password,
-                        obscureText: true,
-                        decoration: InputDecoration(
-                          labelText: tr(
-                            'Hasło logowania (min. 12 znaków)',
-                            'Sign-in password (at least 12 characters)',
-                          ),
-                        ),
-                      ),
-                      const SizedBox(height: 14),
-                      if (!register)
-                        TextField(
-                          contextMenuBuilder: siliqueTextContextMenu,
-                          controller: recovery,
-                          obscureText: true,
-                          decoration: InputDecoration(
-                            labelText: tr(
-                              'Klucz odzyskiwania konta',
-                              'Account recovery key',
-                            ),
-                            hintText: tr(
-                              'Wymagany na nowym urządzeniu',
-                              'Required on a new device',
-                            ),
-                          ),
-                        ),
-                      const SizedBox(height: 16),
-                      OverflowBar(
-                        spacing: 8,
-                        overflowSpacing: 8,
-                        overflowAlignment: OverflowBarAlignment.start,
-                        children: [
-                          FilledButton(
-                            onPressed: busy ? null : connect,
-                            child: Text(
-                              register
-                                  ? tr('Utwórz konto', 'Create account')
-                                  : tr('Połącz konto', 'Connect account'),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: busy
-                                ? null
-                                : () => setState(() => register = !register),
-                            child: Text(
-                              register
-                                  ? tr('Mam konto', 'I have an account')
-                                  : tr('Rejestracja', 'Register'),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ] else ...[
-                      Container(
-                        padding: const EdgeInsets.all(16),
-                        decoration: BoxDecoration(
-                          color: sidebar,
-                          border: Border.all(color: line),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            const Icon(
-                              Icons.cloud_done_outlined,
-                              color: success,
-                            ),
-                            const SizedBox(width: 14),
-                            Expanded(
-                              child: Column(
-                                crossAxisAlignment: CrossAxisAlignment.start,
-                                children: [
-                                  Text(repo.session!.email),
-                                  Text(
-                                    repo.session!.server,
-                                    style: const TextStyle(
-                                      color: muted,
-                                      fontSize: 11,
-                                    ),
-                                  ),
-                                ],
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextButton.icon(
-                        onPressed: busy
-                            ? null
-                            : () => run(() async {
-                                await repo.disconnect();
-                                devices = null;
-                                _untrustedCert = null;
-                              }),
-                        icon: const Icon(Icons.logout, size: 17),
-                        label: Text(tr('Wyloguj konto', 'Sign out')),
-                      ),
-                      if (_untrustedCert != null) ...[
-                        const SizedBox(height: 12),
-                        _untrustedServerBlock(),
-                      ],
-                      pairingSection(),
-                      const SizedBox(height: 20),
-                      Text(
-                        tr('SYNCHRONIZOWANE VAULTY', 'SYNCED VAULTS'),
-                        style: TextStyle(
-                          fontSize: 11,
-                          letterSpacing: 1.3,
-                          color: muted,
-                        ),
-                      ),
-                      const SizedBox(height: 8),
-                      for (final v in repo.vaults)
-                        SwitchListTile(
-                          contentPadding: EdgeInsets.zero,
-                          value: v.syncEnabled,
-                          onChanged: busy
-                              ? null
-                              : (enabled) => run(() => _serverAction(() async {
-                                  if (enabled) {
-                                    await repo.enableSync(v);
-                                    await repo.sync();
-                                  } else {
-                                    v.syncEnabled = false;
-                                    repo.storage.putVault(v);
-                                  }
-                                })),
-                          title: Text(
-                            v.name,
-                            style: const TextStyle(fontSize: 14),
-                          ),
-                          subtitle: _vaultSyncSubtitle(v),
-                        ),
-                      const SizedBox(height: 20),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              tr('URZĄDZENIA', 'DEVICES'),
-                              style: TextStyle(
-                                fontSize: 11,
-                                letterSpacing: 1.3,
-                                color: muted,
-                              ),
-                            ),
-                          ),
-                          TextButton(
-                            onPressed: busy
-                                ? null
-                                : () => run(() => _serverAction(repo.refreshDevices)),
-                            child: Text(tr('Odśwież', 'Refresh')),
-                          ),
-                        ],
-                      ),
-                      if (devices != null)
-                        for (final device in devices!)
-                          ListTile(
-                            contentPadding: EdgeInsets.zero,
-                            leading: const Icon(Icons.devices_outlined),
-                            title: Text(
-                              '${device['name']}${device['id'] == repo.deviceId ? tr(' (to urządzenie)', ' (this device)') : ''}',
-                              style: const TextStyle(fontSize: 13),
-                            ),
-                            subtitle: Text(
-                              '${(device['id'] as String).substring(0, 8)} • ${device['revoked'] == 1 ? tr('dostęp cofnięty', 'access revoked') : tr('aktywne', 'active')}',
-                              style: const TextStyle(fontSize: 11),
-                            ),
-                            trailing: Row(
-                              mainAxisSize: MainAxisSize.min,
-                              children: [
-                                if (device['revoked'] != 1 &&
-                                    device['id'] == repo.deviceId)
-                                  IconButton(
-                                    key: const Key('device-rename'),
-                                    tooltip: tr(
-                                      'Zmień nazwę tego urządzenia',
-                                      'Rename this device',
-                                    ),
-                                    icon: const Icon(
-                                      Icons.edit_outlined,
-                                      size: 18,
-                                    ),
-                                    onPressed: busy
-                                        ? null
-                                        : () async {
-                                            final name = await askText(
-                                              context,
-                                              '',
-                                              titleBuilder: () => tr(
-                                                'Nazwa tego urządzenia',
-                                                'This device’s name',
-                                              ),
-                                              initial:
-                                                  device['name'] as String? ??
-                                                  '',
-                                              hintBuilder: () => tr(
-                                                '1–80 znaków',
-                                                '1–80 characters',
-                                              ),
-                                            );
-                                            if (name == null) return;
-                                            await run(() => _serverAction(() async {
-                                              final saved = await repo
-                                                  .renameDevice(
-                                                    device['id'] as String,
-                                                    name,
-                                                  );
-                                              await repo.refreshDevices();
-                                              message = () => tr(
-                                                'Nazwa urządzenia zapisana na serwerze: $saved',
-                                                'Device name saved on the server: $saved',
-                                              );
-                                            }));
-                                          },
-                                  ),
-                                if (device['revoked'] != 1)
-                                  IconButton(
-                                    tooltip: tr(
-                                      'Cofnij dostęp',
-                                      'Revoke access',
-                                    ),
-                                    icon: const Icon(Icons.block, size: 18),
-                                    onPressed: busy
-                                        ? null
-                                        : () => run(() => _serverAction(() async {
-                                            final confirmed = await showDialog<bool>(
-                                              context: context,
-                                              builder: (ctx) => ListenableBuilder(
-                                                listenable: appLanguage,
-                                                builder: (ctx, _) => AlertDialog(
-                                                  title: Text(
-                                                    tr(
-                                                      'Cofnąć dostęp urządzeniu?',
-                                                      'Revoke device access?',
-                                                    ),
-                                                  ),
-                                                  content: Text(
-                                                    tr(
-                                                      'Urządzenie utraci synchronizację. Wcześniej pobrane dane pozostaną na nim.',
-                                                      'The device will lose sync access. Previously downloaded data will remain on it.',
-                                                    ),
-                                                  ),
-                                                  actions: [
-                                                    TextButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                            ctx,
-                                                            false,
-                                                          ),
-                                                      child: Text(
-                                                        tr('Anuluj', 'Cancel'),
-                                                      ),
-                                                    ),
-                                                    FilledButton(
-                                                      onPressed: () =>
-                                                          Navigator.pop(
-                                                            ctx,
-                                                            true,
-                                                          ),
-                                                      child: Text(
-                                                        tr(
-                                                          'Cofnij dostęp',
-                                                          'Revoke access',
-                                                        ),
-                                                      ),
-                                                    ),
-                                                  ],
-                                                ),
-                                              ),
-                                            );
-                                            if (confirmed != true) return;
-                                            await repo.api!.request(
-                                              'DELETE',
-                                              '/v1/devices/${device['id']}',
-                                            );
-                                            if (device['id'] == repo.deviceId) {
-                                              await repo.disconnect();
-                                              devices = null;
-                                            } else {
-                                              devices = devices
-                                                  ?.where(
-                                                    (entry) =>
-                                                        entry['id'] !=
-                                                        device['id'],
-                                                  )
-                                                  .toList();
-                                            }
-                                          })),
-                                  ),
-                              ],
-                            ),
-                          ),
-                    ],
-                  ],
-                ),
-                _SettingsTabPage(
-                  children: [
-                    if (credentialControl case final control?)
-                      credentialSection(control),
-                    hiddenSection(),
-                    const SizedBox(height: 28),
-                    const Divider(),
-                    const SizedBox(height: 14),
-                    Text(
-                      tr('MIEJSCE DANYCH', 'DATA LOCATION'),
-                      style: TextStyle(
-                        fontSize: 11,
-                        letterSpacing: 1.3,
-                        color: muted,
-                      ),
-                    ),
-                    const SizedBox(height: 8),
-                    SelectableText(
-                      repo.dataLocation,
-                      contextMenuBuilder: siliqueTextContextMenu,
-                      key: const Key('data-location'),
-                      style: const TextStyle(fontSize: 11, color: muted),
-                    ),
-                    if (widget.onMoveStorage != null)
-                      TextButton.icon(
-                        key: const Key('move-storage-settings'),
-                        onPressed: busy ? null : widget.onMoveStorage,
-                        icon: const Icon(
-                          Icons.drive_file_move_outlined,
-                          size: 18,
-                        ),
-                        label: Text(
-                          tr('Zmień miejsce zapisu', 'Change storage location'),
-                        ),
-                      ),
-                    if (NativeStorage.defaultLocationWarning != null)
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8),
-                        child: Text(
-                          NativeStorage.defaultLocationWarning!,
-                          key: const Key('data-location-warning'),
-                          style: const TextStyle(
-                            fontSize: 11,
-                            color: warning,
-                          ),
-                        ),
-                      ),
-                    if (widget.serverTrust != null &&
-                        widget.serverBase != null)
-                      TrustedServerCertSection(
-                        trust: widget.serverTrust!,
-                        base: widget.serverBase!,
-                        onChanged: widget.onChanged,
-                      ),
-                  ],
-                ),
-                _SettingsTabPage(
-                  children: [
-                    if (widget.updater != null)
-                      KeyedSubtree(
-                        key: const Key('updates-section'),
-                        child: UpdatesPanel(
-                          updater: widget.updater!,
-                          beforeInstall: widget.beforeUpdate ?? () async {},
-                        ),
-                      ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-          // Operation feedback stays visible under the tabs no matter which
-          // tab the running action belongs to.
-          if (error != null || message != null || busy)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(24, 4, 24, 16),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  if (error != null)
-                    SelectableText(
-                      error!,
-                      contextMenuBuilder: siliqueTextContextMenu,
-                      style: const TextStyle(color: warning),
-                    ),
-                  if (message != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 12),
-                      child: Text(
-                        message!(),
-                        style: const TextStyle(color: success),
-                      ),
-                    ),
-                  if (busy)
-                    const Padding(
-                      padding: EdgeInsets.only(top: 14),
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
-                ],
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }
@@ -1958,11 +2060,7 @@ class _SettingsPanelState extends State<SettingsPanel>
         children: [
           Text(
             tr('SKRÓTY', 'SHORTCUTS'),
-            style: TextStyle(
-              fontSize: 11,
-              letterSpacing: 1.3,
-              color: muted,
-            ),
+            style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
           ),
           // The reset action sits on its own row so a long localized label
           // cannot force a horizontal overflow at large text scales.
@@ -1975,8 +2073,7 @@ class _SettingsPanelState extends State<SettingsPanel>
             ),
           ),
           const SizedBox(height: 4),
-          for (final action in ShortcutAction.all)
-            _shortcutTile(action),
+          for (final action in ShortcutAction.all) _shortcutTile(action),
         ],
       ),
     );
@@ -2045,15 +2142,13 @@ class _SettingsPanelState extends State<SettingsPanel>
       if (mounted) setState(() {});
     } on ArgumentError catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
       }
     } on FormatException catch (error) {
       if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('$error')),
-        );
+        ScaffoldMessenger.of(context)
+            .showSnackBar(SnackBar(content: Text('$error')));
       }
     }
   }
@@ -2080,7 +2175,9 @@ class _SettingsPanelState extends State<SettingsPanel>
     final currentId = deviceSettings.journalTemplateId;
     // The stored id may point at a template that no longer exists; the picker
     // shows „Brak" in that case rather than a phantom selection.
-    final selectedId = templates.any((t) => t.id == currentId) ? currentId : null;
+    final selectedId = templates.any((t) => t.id == currentId)
+        ? currentId
+        : null;
     final selectedTemplate = selectedId == null
         ? null
         : templates.where((t) => t.id == selectedId).firstOrNull;
@@ -2091,24 +2188,19 @@ class _SettingsPanelState extends State<SettingsPanel>
         const SizedBox(height: 24),
         Text(
           tr('DZIENNIK', 'JOURNAL'),
-          style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.3,
-            color: muted,
-          ),
+          style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
         ),
         const SizedBox(height: 12),
         SiliqueChoice<String?>(
           key: const Key('journal-template-select'),
           value: selectedId,
-          onChanged: vault == null ? null : (value) {
-            unawaited(deviceSettings.setJournalTemplateId(value));
-          },
+          onChanged: vault == null
+              ? null
+              : (value) {
+                  unawaited(deviceSettings.setJournalTemplateId(value));
+                },
           decoration: InputDecoration(
-            labelText: tr(
-              'Domyślny szablon wpisu',
-              'Default entry template',
-            ),
+            labelText: tr('Domyślny szablon wpisu', 'Default entry template'),
           ),
           // The closed trigger stays one line: only the title, no subfolder
           // path; the popup still shows the full item (title + relative path).
@@ -2155,7 +2247,9 @@ class _SettingsPanelState extends State<SettingsPanel>
     final currentId = deviceSettings.noteTemplateId;
     // The stored id may point at a template that no longer exists; the picker
     // shows „Brak" in that case rather than a phantom selection.
-    final selectedId = templates.any((t) => t.id == currentId) ? currentId : null;
+    final selectedId = templates.any((t) => t.id == currentId)
+        ? currentId
+        : null;
     final selectedTemplate = selectedId == null
         ? null
         : templates.where((t) => t.id == selectedId).firstOrNull;
@@ -2166,24 +2260,19 @@ class _SettingsPanelState extends State<SettingsPanel>
         const SizedBox(height: 24),
         Text(
           tr('NOTATKI', 'NOTES'),
-          style: TextStyle(
-            fontSize: 11,
-            letterSpacing: 1.3,
-            color: muted,
-          ),
+          style: TextStyle(fontSize: 11, letterSpacing: 1.3, color: muted),
         ),
         const SizedBox(height: 12),
         SiliqueChoice<String?>(
           key: const Key('note-template-select'),
           value: selectedId,
-          onChanged: vault == null ? null : (value) {
-            unawaited(deviceSettings.setNoteTemplateId(value));
-          },
+          onChanged: vault == null
+              ? null
+              : (value) {
+                  unawaited(deviceSettings.setNoteTemplateId(value));
+                },
           decoration: InputDecoration(
-            labelText: tr(
-              'Domyślny szablon notatki',
-              'Default note template',
-            ),
+            labelText: tr('Domyślny szablon notatki', 'Default note template'),
           ),
           // The closed trigger stays one line: only the title, no subfolder
           // path; the popup still shows the full item (title + relative path).
@@ -2274,6 +2363,14 @@ class _SettingsPanelState extends State<SettingsPanel>
   }
 }
 
+/// A settings section navigation entry: its tab/sidebar key, icon and label.
+class _SectionSpec {
+  const _SectionSpec(this.key, this.icon, this.label);
+  final Key key;
+  final IconData icon;
+  final String label;
+}
+
 /// A scrollable settings tab page that stays alive once visited, so its
 /// fields, scroll offset and element states survive tab switches and the
 /// language rebuilds of the open dialog.
@@ -2294,9 +2391,15 @@ class _SettingsTabPageState extends State<_SettingsTabPage>
     super.build(context);
     return SingleChildScrollView(
       padding: const EdgeInsets.all(24),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: widget.children,
+      // The section pane sits in an `IndexedStack`, whose children get loose
+      // width constraints. Without this the page would shrink-wrap to its widest
+      // intrinsic child and the tiles would lay out a few dozen pixels wide.
+      child: SizedBox(
+        width: double.infinity,
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: widget.children,
+        ),
       ),
     );
   }
@@ -2379,7 +2482,9 @@ class _ShortcutCaptureDialogState extends State<_ShortcutCaptureDialog> {
         focusNode: _focus,
         autofocus: true,
         onKeyEvent: _onKey,
-        child: Text(_hint ?? tr('Naciśnij kombinację…', 'Press a combination…')),
+        child: Text(
+          _hint ?? tr('Naciśnij kombinację…', 'Press a combination…'),
+        ),
       ),
       actions: [
         TextButton(
@@ -2479,10 +2584,7 @@ Future<String?> askFolderName(
                       padding: const EdgeInsets.only(top: 10),
                       child: Text(
                         error,
-                        style: const TextStyle(
-                          color: warning,
-                          fontSize: 12,
-                        ),
+                        style: const TextStyle(color: warning, fontSize: 12),
                       ),
                     ),
                 ],

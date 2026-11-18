@@ -56,12 +56,26 @@ Finder _settingsViewport() => find
     )
     .first;
 
-/// The settings dialog must be opened on the given tab.
+const _sectionKeys = [
+  'settings-tab-general',
+  'settings-tab-appearance',
+  'settings-tab-shortcuts',
+  'settings-tab-account',
+  'settings-tab-storage',
+  'settings-tab-updates',
+];
+
+/// The settings dialog must be opened on the given section.
 void _expectSelectedTab(WidgetTester tester, int index) {
+  var selected = -1;
+  for (var i = 0; i < _sectionKeys.length; i++) {
+    final tile = tester.widget<Material>(find.byKey(Key(_sectionKeys[i])));
+    if (tile.color != Colors.transparent) selected = i;
+  }
   expect(
-    tester.widget<TabBar>(find.byType(TabBar)).controller!.index,
+    selected,
     index,
-    reason: 'the settings dialog opened on the wrong tab',
+    reason: 'the settings dialog opened on the wrong section',
   );
 }
 
