@@ -4706,7 +4706,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             style: const TextStyle(
               fontSize: 11,
               color: Colors.white,
-              fontFamily: 'Inter',
+              fontFamily: kUiFontFamily,
             ),
             items: [
               for (final v in repo.vaults)

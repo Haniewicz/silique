@@ -92,14 +92,6 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
   @override
   void didChangeMetrics() => _refreshAfterLayout();
 
-  /// A text scale or directionality change moves the pill too, and arrives in
-  /// the build phase as well, so it needs the same post-frame refresh.
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _refreshAfterLayout();
-  }
-
   @override
   void dispose() {
     // The observer must go before the entry: a metrics callback after `remove`
@@ -111,9 +103,10 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
   }
 
   /// The label style is built explicitly from the theme. A bare `OverlayEntry`
-  /// is not under a `Material`/`DefaultTextStyle`, so it would otherwise inherit
-  /// `DefaultTextStyle.fallback()` — monospace, w900, yellow double underline —
-  /// instead of the UI font.
+  /// has no `Material` above it, so `WidgetsApp` gives it the app-wide error
+  /// style (`MaterialApp._errorTextStyle`: monospace, w900, size 48, yellow
+  /// double underline). The label must therefore name its own family, weight
+  /// and decoration instead of inheriting them.
   TextStyle _labelStyle(BuildContext context) => TextStyle(
     fontFamily:
         Theme.of(context).textTheme.bodyMedium?.fontFamily ?? kUiFontFamily,

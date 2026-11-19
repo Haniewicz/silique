@@ -12,9 +12,9 @@ const line = Color(0xff2c3548),
 const syncOn = Color(0xff76e6b3), syncOff = Color(0xffffab40);
 
 /// Bundled UI family (assets/fonts, OFL). Widgets rendered outside the normal
-/// `Material` tree — e.g. a bare `OverlayEntry` — do not inherit the theme's
-/// `DefaultTextStyle` and would otherwise render in Flutter's fallback type
-/// (`monospace`, w900, yellow double underline), so they must name this token.
+/// `Material` tree — e.g. a bare `OverlayEntry` — get `WidgetsApp`'s app-wide
+/// error style (`MaterialApp._errorTextStyle`: monospace, w900, yellow double
+/// underline) instead of the theme, so they must name this family explicitly.
 const kUiFontFamily = 'Inter';
 
 /// Bundled monospace family (assets/fonts, OFL). The generic `'monospace'`
