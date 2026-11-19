@@ -410,6 +410,7 @@ class SettingsPanel extends StatefulWidget {
     this.openUpdates = false,
     this.serverTrust,
     this.serverBase,
+    this.widgetDiagnostics,
     this.pollInterval = const Duration(seconds: 2),
   });
 
@@ -432,6 +433,10 @@ class SettingsPanel extends StatefulWidget {
   /// The switch is disabled while no unlocked vault is current.
   final Vault? vault;
   final VoidCallback? onMoveStorage;
+
+  /// Loads the native Android widget diagnostics. Null on platforms without
+  /// launcher widgets, which hides the diagnostics row entirely.
+  final Future<String> Function()? widgetDiagnostics;
   final AppUpdater? updater;
   final Future<void> Function()? beforeUpdate;
 
@@ -1401,6 +1406,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
         _journalTemplateTile(),
         _noteTemplateTile(),
         _templatesFolderTile(),
+        _widgetDiagnosticsTile(),
       ],
     ),
     _SettingsTabPage(
@@ -2393,6 +2399,83 @@ class _SettingsPanelState extends State<SettingsPanel> {
             style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
           ),
         ),
+      ),
+    );
+  }
+
+  /// Android-only: the launcher renders outside the app, so read/publish
+  /// outcomes of the encrypted widget snapshot are only visible here.
+  Widget _widgetDiagnosticsTile() {
+    final load = widget.widgetDiagnostics;
+    if (load == null) return const SizedBox.shrink();
+    return _settingsRowGap(
+      ListTile(
+        key: const Key('widget-diagnostics-tile'),
+        contentPadding: settingsItemPadding,
+        shape: settingsItemShape,
+        leading: const Icon(Icons.bug_report_outlined, size: 20),
+        title: Text(
+          tr('Diagnostyka widżetów', 'Widget diagnostics'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            tr(
+              'Zapis odczytów i odświeżeń widżetów Androida. Przydatny przy zgłaszaniu problemów z listą notatek lub wyszukiwarką.',
+              'A log of Android widget reads and refreshes, useful when reporting problems with the note list or search.',
+            ),
+            style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
+          ),
+        ),
+        onTap: () => _showWidgetDiagnostics(load),
+      ),
+    );
+  }
+
+  Future<void> _showWidgetDiagnostics(Future<String> Function() load) async {
+    final raw = await load();
+    if (!mounted) return;
+    final body = raw.trim().isEmpty
+        ? tr('Brak zapisanych zdarzeń.', 'No events recorded yet.')
+        : raw.trim();
+    await showDialog<void>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text(tr('Diagnostyka widżetów', 'Widget diagnostics')),
+        content: SizedBox(
+          width: 480,
+          height: 340,
+          child: SingleChildScrollView(
+            child: SelectableText(
+              body,
+              key: const Key('widget-diagnostics-text'),
+              contextMenuBuilder: siliqueTextContextMenu,
+              style: const TextStyle(
+                fontFamily: 'monospace',
+                fontSize: 11,
+                height: 1.5,
+              ),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            key: const Key('widget-diagnostics-copy'),
+            onPressed: () {
+              unawaited(Clipboard.setData(ClipboardData(text: body)));
+              ScaffoldMessenger.maybeOf(ctx)?.showSnackBar(
+                SnackBar(content: Text(tr('Skopiowano.', 'Copied.'))),
+              );
+            },
+            child: Text(tr('Kopiuj', 'Copy')),
+          ),
+          FilledButton(
+            key: const Key('widget-diagnostics-close'),
+            onPressed: () => Navigator.pop(ctx),
+            child: Text(tr('Zamknij', 'Close')),
+          ),
+        ],
       ),
     );
   }

@@ -726,6 +726,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _syncCoordinator.start();
+      // The launcher may have re-rendered while the app was away, and a failed
+      // publish can leave the native snapshot stale: republish on every resume.
+      unawaited(
+        _androidWidgets.refresh().catchError((Object error) {
+          _androidWidgets.lastError = error;
+        }),
+      );
     } else {
       _syncCoordinator.stop();
       if (repo.hiddenLockOnBackground) {
@@ -1618,6 +1625,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
             updater: _updates,
             beforeUpdate: _flush,
             openUpdates: openUpdates,
+            widgetDiagnostics: Platform.isAndroid
+                ? _androidWidgets.diagnostics
+                : null,
             onMoveStorage: canMoveStorage
                 ? () => Navigator.pop(ctx, true)
                 : null,

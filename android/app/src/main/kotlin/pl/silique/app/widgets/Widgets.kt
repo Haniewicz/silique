@@ -12,6 +12,13 @@ import android.widget.RemoteViews
 import android.widget.RemoteViewsService
 import pl.silique.app.R
 
+/** What the launcher can currently show: a real list, the locked mask, or an unreadable index. */
+sealed class WidgetContent {
+    object Locked : WidgetContent()
+    class Ready(val notes: List<WidgetNote>, val lastVaultId: String?) : WidgetContent()
+    object Unavailable : WidgetContent()
+}
+
 object WidgetRuntime {
     var storeFactory: (Context) -> SnapshotStore = { SnapshotStore(it) }
     val actions = WidgetActionQueue()
@@ -22,7 +29,24 @@ object WidgetRuntime {
         private set
     fun store(context: Context) = storeFactory(context.applicationContext)
     fun locked(context: Context) = screenOff || (context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
-    fun snapshot(context: Context) = if (locked(context)) WidgetSnapshot() else store(context).read()
+    /**
+     * One read per render. A genuinely empty index ([SnapshotRead.Missing]) stays
+     * distinct from an index that cannot be read right now ([SnapshotRead.Unavailable]),
+     * so the launcher never paints "no notes" for a transient Keystore or I/O failure.
+     */
+    fun content(context: Context): WidgetContent {
+        if (locked(context)) return WidgetContent.Locked
+        return when (val outcome = store(context).readOutcome()) {
+            is SnapshotRead.Ok -> WidgetContent.Ready(outcome.snapshot.notes, outcome.snapshot.lastVaultId)
+            SnapshotRead.Missing -> WidgetContent.Ready(emptyList(), null)
+            is SnapshotRead.Unavailable -> WidgetContent.Unavailable
+            SnapshotRead.Corrupt -> WidgetContent.Unavailable
+        }
+    }
+    fun snapshot(context: Context): WidgetSnapshot = when (val content = content(context)) {
+        is WidgetContent.Ready -> WidgetSnapshot(content.notes, content.lastVaultId)
+        else -> WidgetSnapshot()
+    }
     fun listen(listener: () -> Unit) { listeners.add(listener) }
     fun unlisten(listener: () -> Unit) { listeners.remove(listener) }
     fun listenLanguage(listener: () -> Unit) { languageListeners.add(listener) }
@@ -61,6 +85,9 @@ object WidgetRuntime {
                 if (type == NoteListWidget::class.java) manager.notifyAppWidgetViewDataChanged(id, R.id.widget_notes)
             }
         }
+        // A render that lands locked or unreadable must not stay wrong until the
+        // app is next opened: arm the bounded retry poll after every render.
+        WidgetRefreshReceiver().onRendered(context)
     }
 }
 
@@ -87,29 +114,51 @@ object WidgetRenderer {
     }
     fun list(base: Context, id: Int): RemoteViews {
         val context = pl.silique.app.SiliqueLanguage.context(base)
+        val content = WidgetRuntime.content(base)
+        WidgetDiagnostics.record(base, "render", "widget=${id} type=list state=${stateName(content)}")
         return RemoteViews(context.packageName, R.layout.widget_notes).apply {
-            val locked = WidgetRuntime.locked(context)
-            setTextViewText(R.id.widget_recent, context.getString(if (locked) R.string.widget_notes_locked else R.string.widget_notes_header))
             // RemoteViews is inflated by the launcher's (possibly different) locale.
             // Override every localized XML value before handing it to that host.
-            setTextViewText(R.id.widget_empty, context.getString(R.string.widget_notes_empty))
+            setTextViewText(R.id.widget_recent, context.getString(if (content is WidgetContent.Locked) R.string.widget_notes_locked else R.string.widget_notes_header))
             setContentDescription(R.id.widget_surface, context.getString(R.string.widget_notes_description))
-            setViewVisibility(R.id.widget_notes, if (locked) View.GONE else View.VISIBLE)
-            setRemoteAdapter(R.id.widget_notes, Intent(context, NotesRemoteViewsService::class.java).apply {
-                putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
-                data = Uri.parse("silique-widget://collection/$id")
-            })
-            setEmptyView(R.id.widget_notes, R.id.widget_empty)
             setOnClickPendingIntent(R.id.widget_recent, WidgetIntents.searchPending(context, id))
-            setPendingIntentTemplate(R.id.widget_notes, WidgetIntents.collectionPending(context, id))
+            when (content) {
+                is WidgetContent.Ready -> {
+                    setViewVisibility(R.id.widget_notes, View.VISIBLE)
+                    setTextViewText(R.id.widget_empty, context.getString(R.string.widget_notes_empty))
+                    setRemoteAdapter(R.id.widget_notes, Intent(context, NotesRemoteViewsService::class.java).apply {
+                        putExtra(AppWidgetManager.EXTRA_APPWIDGET_ID, id)
+                        data = Uri.parse("silique-widget://collection/$id")
+                    })
+                    setEmptyView(R.id.widget_notes, R.id.widget_empty)
+                    setPendingIntentTemplate(R.id.widget_notes, WidgetIntents.collectionPending(context, id))
+                }
+                WidgetContent.Locked -> {
+                    // Never show an empty-list hint for a state that is only masked.
+                    setViewVisibility(R.id.widget_notes, View.GONE)
+                    setTextViewText(R.id.widget_empty, "")
+                    setViewVisibility(R.id.widget_empty, View.GONE)
+                }
+                WidgetContent.Unavailable -> {
+                    setViewVisibility(R.id.widget_notes, View.GONE)
+                    setTextViewText(R.id.widget_empty, context.getString(R.string.widget_notes_unavailable))
+                    setViewVisibility(R.id.widget_empty, View.VISIBLE)
+                }
+            }
         }
+    }
+    private fun stateName(content: WidgetContent): String = when (content) {
+        is WidgetContent.Ready -> "notes=${content.notes.size}"
+        WidgetContent.Locked -> "locked"
+        WidgetContent.Unavailable -> "unavailable"
     }
     fun newNote(base: Context, id: Int): RemoteViews {
         val context = pl.silique.app.SiliqueLanguage.context(base)
+        val lastVaultId = (WidgetRuntime.content(base) as? WidgetContent.Ready)?.lastVaultId
         return RemoteViews(context.packageName, R.layout.widget_action).apply {
             setTextViewText(R.id.widget_action, context.getString(R.string.widget_new_note))
             setContentDescription(R.id.widget_action, context.getString(R.string.widget_new_note_description))
-            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.newPending(context, WidgetRuntime.snapshot(context).lastVaultId, id))
+            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.newPending(context, lastVaultId, id))
         }
     }
     fun search(base: Context, id: Int): RemoteViews {
@@ -122,10 +171,11 @@ object WidgetRenderer {
     }
     fun journal(base: Context, id: Int): RemoteViews {
         val context = pl.silique.app.SiliqueLanguage.context(base)
+        val lastVaultId = (WidgetRuntime.content(base) as? WidgetContent.Ready)?.lastVaultId
         return RemoteViews(context.packageName, R.layout.widget_action).apply {
             setTextViewText(R.id.widget_action, context.getString(R.string.widget_journal_action))
             setContentDescription(R.id.widget_action, context.getString(R.string.widget_journal_description))
-            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.journalPending(context, WidgetRuntime.snapshot(context).lastVaultId, id))
+            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.journalPending(context, lastVaultId, id))
         }
     }
 }
@@ -147,9 +197,11 @@ class NotesRemoteViewsService : RemoteViewsService() {
     class Factory(private val context: Context) : RemoteViewsFactory {
         private var notes: List<WidgetNote> = emptyList()
         override fun onCreate() { onDataSetChanged() }
-        override fun onDataSetChanged() { notes = WidgetRuntime.snapshot(context).notes }
+        override fun onDataSetChanged() { notes = readyNotes() }
         override fun onDestroy() { notes = emptyList() }
-        override fun getCount() = WidgetRuntime.snapshot(context).notes.size
+        override fun getCount() = readyNotes().size
+        private fun readyNotes() =
+            (WidgetRuntime.content(context) as? WidgetContent.Ready)?.notes ?: emptyList()
         override fun getViewAt(position: Int): RemoteViews? {
             if (WidgetRuntime.locked(context)) return null
             // Re-read to prevent an invalidated factory retaining a revoked row.

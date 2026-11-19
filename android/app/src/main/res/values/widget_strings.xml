@@ -7,6 +7,8 @@
     <string name="widget_notes_header">Silique · Notes ›</string>
     <string name="widget_notes_locked">Silique · Locked</string>
     <string name="widget_notes_empty">No notes</string>
+    <string name="widget_notes_unavailable">Notes are temporarily unavailable</string>
+    <string name="widget_search_locked">Notes are locked</string>
     <string name="widget_new_note">+ New note</string>
     <string name="widget_search_action">⌕ Search notes</string>
     <string name="widget_journal_action">✎ Journal entry</string>

@@ -274,10 +274,18 @@ class AndroidWidgets {
       final snapshot = _snapshot();
       final encoded = jsonEncode(snapshot);
       if (encoded == _published) return;
-      if ((snapshot['notes'] as List).isEmpty) {
-        await channel.invokeMethod<void>('clearSnapshot');
-      } else {
-        await channel.invokeMethod<void>('publishSnapshot', snapshot);
+      try {
+        if ((snapshot['notes'] as List).isEmpty) {
+          await channel.invokeMethod<void>('clearSnapshot');
+        } else {
+          await channel.invokeMethod<void>('publishSnapshot', snapshot);
+        }
+      } catch (error) {
+        // The native store rejected or failed to persist this payload. Forget
+        // the cache marker: the next refresh must retry even when the data did
+        // not change, otherwise one failure hides the notes until an edit.
+        _published = null;
+        rethrow;
       }
       _published = encoded;
       lastError = null;
@@ -286,6 +294,18 @@ class AndroidWidgets {
       lastError = error;
     });
     return next;
+  }
+
+  /// Native widget diagnostics: snapshot read/write outcomes, renders and retry
+  /// polls. Empty when the channel is unavailable; never throws.
+  Future<String> diagnostics() async {
+    if (!enabled || _disposed) return '';
+    try {
+      return await channel.invokeMethod<String>('widgetDiagnostics') ?? '';
+    } catch (error) {
+      lastError = error;
+      return '';
+    }
   }
 
   Future<void> dispose() async {

@@ -7,6 +7,35 @@ the exact ordinary note. New-note and journal actions open the ordinary editor,
 leaving and locking the hidden section first. Journal uses the repository's normal
 local-date/title behavior.
 
+## What the launcher can show
+
+Every render resolves to exactly one of three states, so a temporary problem never
+looks like an empty vault:
+
+- **ready** — the decrypted index is present (possibly with zero notes, which is a
+  genuine "no notes" and shows that hint);
+- **locked** — the keyguard is up or the screen is off: the list is hidden and the
+  header says the notes are locked; no empty-list hint is drawn;
+- **unreadable** — the encrypted snapshot cannot be read right now (Keystore not
+  usable yet, transient I/O): the list is hidden and the launcher shows
+  "notes are temporarily unavailable" instead of "no notes". The file is kept.
+
+A render that lands locked or unreadable arms a bounded retry poll (60 s, at most
+30 ticks) that repaints until the state settles, so a cold-start render does not
+stay wrong until the app is next opened. The app also republishes the snapshot
+when it returns to the foreground, and a rejected publish no longer drops the last
+good encrypted copy.
+
+## Diagnostics
+
+Widget work happens in the launcher's process, so the app exposes a bounded,
+content-free log (`silique-widgets.log`, at most 64 KiB, next to the encrypted
+snapshot): timestamp, pid, event (read/write outcome, render state, retry polls)
+and counts plus exception class names. It never records titles, bodies, folder
+names or search queries. **Ustawienia → Ogólne → Diagnostyka widżetów** shows the
+log with a copy button. Only a real decryption/format failure drops the snapshot;
+a transient key or I/O problem keeps it.
+
 ## Privacy boundary
 
 - Only unlocked account-mode vaults contribute notes. Hidden, deleted and
@@ -37,10 +66,9 @@ flutter analyze --no-pub
 ```
 
 Robolectric host tests run from the `android/` directory and need JDK 17 and the
-Android SDK. On the constrained Hermes
-host, use the installed direct Gradle executable (the repository wrapper may not
-be installed), one worker, `-Dorg.gradle.jvmargs=-Xmx640m`, and
-`-Pkotlin.compiler.execution.strategy=in-process`:
+Android SDK. On the constrained Hermes host, use the installed direct Gradle
+executable (the repository wrapper may not be installed), one worker,
+`-Dorg.gradle.jvmargs=-Xmx640m`, and `-Pkotlin.compiler.execution.strategy=in-process`:
 
 ```sh
 export JAVA_HOME="$HOME/.local/share/silique-toolchains/jdk17"
@@ -74,5 +102,11 @@ Keystore behavior, lock-screen rendering or launcher behavior on a physical phon
 5. Lock/screen-off with search open and with list rows visible, then unlock.
    Confirm queries/results are wiped and no stale row opens. Lock an account
    vault in-app, tap a launcher action, unlock it and confirm one eventual action.
-6. Confirm `silique-widgets.enc` is absent from backups and contains no plaintext;
+6. Lock the phone, let the app process die, then unlock: the list must repaint
+   without opening the app. Force-stop the app, reboot the device, and confirm the
+   widget shows notes (or "locked"/"temporarily unavailable", never a false
+   "no notes").
+7. Open **Ustawienia → Ogólne → Diagnostyka widżetów**, confirm the log lists the
+   recent renders/reads and that copying it works.
+8. Confirm `silique-widgets.enc` is absent from backups and contains no plaintext;
    verify the real device Keystore path and tamper failure without exporting keys.

@@ -59,6 +59,33 @@ class SnapshotStoreTest {
         assertTrue(store.read().notes.isEmpty())
     }
 
+    @Test fun readOutcomeSeparatesMissingTransientAndCorruptStates() {
+        val store = SnapshotStore(context) { key }
+        store.clear()
+        assertEquals(SnapshotRead.Missing, store.readOutcome())
+        store.write(snapshot)
+        assertTrue(store.readOutcome() is SnapshotRead.Ok)
+        // A transiently unavailable key must report Unavailable and keep the file.
+        assertTrue(SnapshotStore(context) { throw IllegalStateException("keystore locked") }.readOutcome() is SnapshotRead.Unavailable)
+        assertTrue("Unreadable snapshot must survive", store.file.exists())
+        // Tampered ciphertext with a usable key is real corruption: report and drop it.
+        val bytes = store.file.readBytes()
+        bytes[bytes.lastIndex] = (bytes.last().toInt() xor 1).toByte()
+        store.file.writeBytes(bytes)
+        assertEquals(SnapshotRead.Corrupt, store.readOutcome())
+        assertFalse("Corrupt snapshot must be dropped", store.file.exists())
+    }
+
+    @Test fun removeVaultNeverDropsTheOnlySnapshotOnATransientReadFailure() {
+        val store = SnapshotStore(context) { key }
+        store.write(snapshot)
+        val unreadable = SnapshotStore(context) { throw IllegalStateException("keystore locked") }
+        val outcome = runCatching { unreadable.removeVault("vault-1") }
+        assertTrue("A transient read failure must abort the revocation", outcome.isFailure)
+        assertTrue("The only snapshot copy must survive", store.file.exists())
+        assertEquals(1, SnapshotStore(context) { key }.read().notes.size)
+    }
+
     @Test fun transientKeystoreFailureKeepsSnapshotFileForLaterRecovery() {
         val store = SnapshotStore(context) { key }
         store.write(snapshot)

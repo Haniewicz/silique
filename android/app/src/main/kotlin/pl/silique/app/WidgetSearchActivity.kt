@@ -9,13 +9,17 @@ import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
+import android.view.View
 import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.EditText
 import android.widget.ListView
+import android.widget.TextView
+import pl.silique.app.widgets.WidgetContent
 import pl.silique.app.widgets.WidgetIntents
 import pl.silique.app.widgets.WidgetNote
 import pl.silique.app.widgets.WidgetRuntime
+import pl.silique.app.widgets.WidgetSnapshot
 
 /** Native-only modal: creating it never initializes a Flutter engine. */
 class WidgetSearchActivity : Activity() {
@@ -25,11 +29,13 @@ class WidgetSearchActivity : Activity() {
 
     private lateinit var query: EditText
     private lateinit var results: ListView
+    private lateinit var status: TextView
     private var presentation: ArrayAdapter<String>? = null
     private var rows: List<WidgetNote> = emptyList()
     private var revocationVersion = WidgetRuntime.revocationVersion
     private val changed: () -> Unit = {
-        if (revocationVersion != WidgetRuntime.revocationVersion || WidgetRuntime.locked(this) || WidgetRuntime.snapshot(this).notes.isEmpty()) query.setText("")
+        val content = WidgetRuntime.content(this)
+        if (revocationVersion != WidgetRuntime.revocationVersion || content !is WidgetContent.Ready || content.notes.isEmpty()) query.setText("")
         revocationVersion = WidgetRuntime.revocationVersion
         refresh()
     }
@@ -45,6 +51,7 @@ class WidgetSearchActivity : Activity() {
         findViewById<android.view.View>(R.id.widget_search_backdrop).setOnClickListener { finish() }
         query = findViewById(R.id.widget_query)
         results = findViewById(R.id.widget_results)
+        status = findViewById(R.id.widget_search_status)
         query.requestFocus()
         window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
         WidgetRuntime.listen(changed)
@@ -70,7 +77,19 @@ class WidgetSearchActivity : Activity() {
     private fun refresh() {
         if (!::query.isInitialized) return
         if (WidgetRuntime.locked(this) && query.text.isNotEmpty()) query.setText("")
-        rows = WidgetRuntime.snapshot(this).search(query.text.toString())
+        val content = WidgetRuntime.content(this)
+        rows = if (content is WidgetContent.Ready) {
+            WidgetSnapshot(content.notes, content.lastVaultId).search(query.text.toString())
+        } else {
+            emptyList()
+        }
+        // Say why there is nothing instead of looking like an empty vault.
+        status.text = when (content) {
+            is WidgetContent.Ready -> ""
+            WidgetContent.Locked -> SiliqueLanguage.text(this, R.string.widget_search_locked)
+            WidgetContent.Unavailable -> SiliqueLanguage.text(this, R.string.widget_notes_unavailable)
+        }
+        status.visibility = if (status.text.isEmpty()) View.GONE else View.VISIBLE
         renderPresentation()
     }
     private fun renderPresentation() {

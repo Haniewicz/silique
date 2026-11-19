@@ -336,4 +336,61 @@ void main() {
     expect(published.toString(), isNot(contains('Protected secret')));
     expect(published.toString(), isNot(contains('Deleted secret')));
   });
+
+  test('a failed publish is retried even after the data changes back', () async {
+    final data = await bridgeFixture();
+    var fail = false;
+    var publishes = 0;
+    TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+        .setMockMethodCallHandler(data.bridge.channel, (call) async {
+          data.calls.add(call);
+          if (call.method == 'publishSnapshot') {
+            publishes++;
+            if (fail) {
+              throw PlatformException(code: 'simulated-publish-failure');
+            }
+          }
+          return null;
+        });
+    await data.bridge.refresh();
+    expect(publishes, 1);
+    final original = data.note;
+    fail = true;
+    await data.repo.save(original.copyWith(title: 'Failing publish'));
+    await expectLater(data.bridge.refresh(), throwsA(isA<PlatformException>()));
+    expect(publishes, 2);
+    expect(data.bridge.lastError, isA<PlatformException>());
+    // Back to the payload that was already published once: without invalidating
+    // the published-cache marker this refresh would be skipped and the launcher
+    // would keep showing the payload the failed publish never replaced.
+    fail = false;
+    await data.repo.save(original);
+    await data.bridge.refresh();
+    expect(publishes, 3);
+    expect(data.bridge.lastError, isNull);
+    expect(
+      data.calls.last.arguments.toString(),
+      isNot(contains('Failing publish')),
+    );
+  });
+
+  test(
+    'native diagnostics are read from the channel and never throw',
+    () async {
+      final data = await bridgeFixture();
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(data.bridge.channel, (call) async {
+            data.calls.add(call);
+            if (call.method == 'widgetDiagnostics') return 'read_ok notes=1';
+            return null;
+          });
+      expect(await data.bridge.diagnostics(), 'read_ok notes=1');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(data.bridge.channel, (call) async {
+            throw PlatformException(code: 'diagnostics-unavailable');
+          });
+      expect(await data.bridge.diagnostics(), '');
+      expect(data.bridge.lastError, isA<PlatformException>());
+    },
+  );
 }

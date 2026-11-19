@@ -7,6 +7,8 @@
     <string name="widget_notes_header">Silique · Notatki ›</string>
     <string name="widget_notes_locked">Silique · Zablokowane</string>
     <string name="widget_notes_empty">Brak notatek</string>
+    <string name="widget_notes_unavailable">Notatki chwilowo niedostępne</string>
+    <string name="widget_search_locked">Notatki są zablokowane</string>
     <string name="widget_new_note">+ Nowa notatka</string>
     <string name="widget_search_action">⌕ Szukaj notatek</string>
     <string name="widget_journal_action">✎ Wpis do dziennika</string>

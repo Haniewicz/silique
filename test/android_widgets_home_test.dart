@@ -11,12 +11,20 @@ import 'package:silique/ui/theme.dart';
 import 'hidden_notes_home_test.dart'
     show fixture, drainUntil, chooseHiddenFolder;
 
-Future<({AndroidWidgets bridge, List<Map<String, Object?>> pending})>
+Future<
+  ({
+    AndroidWidgets bridge,
+    List<Map<String, Object?>> pending,
+    List<MethodCall> calls,
+  })
+>
 mountWidgets(WidgetTester tester, Notebook repo) async {
   const channel = MethodChannel('silique.notes/widgets-home-test');
   final pending = <Map<String, Object?>>[];
+  final calls = <MethodCall>[];
   TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
       .setMockMethodCallHandler(channel, (call) async {
+        calls.add(call);
         if (call.method == 'takePendingAction') {
           return pending.isEmpty ? null : pending.removeAt(0);
         }
@@ -47,7 +55,7 @@ mountWidgets(WidgetTester tester, Notebook repo) async {
     ),
   );
   await tester.pumpAndSettle();
-  return (bridge: bridge, pending: pending);
+  return (bridge: bridge, pending: pending, calls: calls);
 }
 
 Future<void> sendAction(WidgetTester tester, AndroidWidgets bridge) async {
@@ -261,6 +269,44 @@ void main() {
             .text,
         'Widget target',
       );
+    },
+  );
+
+  testWidgets(
+    'returning to the app republishes after a failed launcher publish',
+    (tester) async {
+      final repo = await fixture(tester);
+      final data = await mountWidgets(tester, repo);
+      var failPublish = false;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(data.bridge.channel, (call) async {
+            data.calls.add(call);
+            if (call.method == 'takePendingAction') return null;
+            if (call.method == 'publishSnapshot' && failPublish) {
+              throw PlatformException(code: 'simulated-publish-failure');
+            }
+            return null;
+          });
+      failPublish = true;
+      await tester.runAsync(() => repo.createNote(repo.vaults.single.id));
+      await drainUntil(tester, () => data.bridge.lastError != null);
+      final before = data.calls
+          .where((call) => call.method == 'publishSnapshot')
+          .length;
+      failPublish = false;
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.inactive);
+      await tester.pump();
+      tester.binding.handleAppLifecycleStateChanged(AppLifecycleState.resumed);
+      await drainUntil(
+        tester,
+        () =>
+            data.calls
+                .where((call) => call.method == 'publishSnapshot')
+                .length >
+            before,
+      );
+      expect(data.bridge.lastError, isNull);
+      await tester.pumpWidget(const SizedBox());
     },
   );
 }
