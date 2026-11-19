@@ -24,6 +24,7 @@ import '../core/shortcut_bindings.dart';
 import '../l10n/app_language.dart';
 import '../core/search.dart';
 import '../core/span_size.dart';
+import '../core/span_color.dart';
 import '../core/workspace.dart';
 import '../services/notebook.dart';
 import '../services/android_widgets.dart';
@@ -197,6 +198,37 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   bool _finding = false;
   final double _fontSize = 14;
   final _spanSize = TextEditingController(text: '16');
+  final _spanSizeFocus = FocusNode();
+
+  /// Preset text colors for the toolbar color menu.
+  ///
+  /// The editor paints light text on a dark document, so the palette keeps two
+  /// light neutrals for emphasis instead of black: a black run would vanish on
+  /// the dark surface (and its swatch on the dark menu).
+  static const _textColorHexes = [
+    '#E53935',
+    '#FB8C00',
+    '#FDD835',
+    '#43A047',
+    '#00ACC1',
+    '#1E88E5',
+    '#8E24AA',
+    '#D81B60',
+    '#B0BEC5',
+    '#FFFFFF',
+  ];
+
+  /// Preset highlight colors (full opacity; applied at [defaultHighlightAlpha]).
+  static const _highlightHexes = [
+    '#FFEB3B',
+    '#CDDC39',
+    '#4CAF50',
+    '#00BCD4',
+    '#2196F3',
+    '#F44336',
+    '#FF9800',
+    '#E91E63',
+  ];
   int _matchIndex = -1;
   List<TextRange> _findMatches = const [];
   int _generation = 0;
@@ -1030,6 +1062,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _find.dispose();
     _findFocus.dispose();
     _spanSize.dispose();
+    _spanSizeFocus.dispose();
     _raw?.dispose();
     super.dispose();
   }
@@ -1093,6 +1126,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   void _changed() {
     if (_loading || _selected == null) return;
+    _syncSpanSizeField();
     if (_windowsUpdateBlocked ||
         _revealingHidden ||
         repo.vaultDeletionPending(_selected!.vaultId)) {
@@ -1969,6 +2003,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
         extentOffset: start + before.length + text.length,
       ),
     );
+    _refocusBody();
   }
 
   /// Picks the tab that should become selected after [id] closes. Prefers the
@@ -2155,6 +2190,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   /// Applies an inline font size to the current editor selection only.
   void _applySpanSize() {
+    if (_formattingBlocked) return;
     final size = double.tryParse(_spanSize.text.replaceAll(',', '.'));
     if (size == null || size < minSpanFontSize || size > maxSpanFontSize) {
       _notify(
@@ -2175,6 +2211,168 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     _editor.setValue(
       TextEditingValue(text: result.text, selection: result.selection),
     );
+    _refocusBody();
+  }
+
+  /// Moves the span-size value by [delta] (clamped to 8–72) and, when the
+  /// document has a non-collapsed selection, applies it immediately.
+  void _nudgeSpanSize(int delta) {
+    if (_formattingBlocked) return;
+    final current = double.tryParse(_spanSize.text.replaceAll(',', '.'));
+    final next = ((current ?? minSpanFontSize) + delta).clamp(
+      minSpanFontSize,
+      maxSpanFontSize,
+    );
+    _spanSize.text = formatSpanFontSize(next);
+    if (_editor.selection.isValid && !_editor.selection.isCollapsed) {
+      _applySpanSize();
+    } else {
+      _refocusBody();
+    }
+  }
+
+  /// Mirrors the current selection's font-size run into the toolbar field,
+  /// without overwriting text while the field itself is being edited.
+  void _syncSpanSizeField() {
+    if (_spanSizeFocus.hasFocus) return;
+    final size = spanFontSizeAt(_editor.text, _editor.selection);
+    if (size == null) return;
+    final text = formatSpanFontSize(size);
+    if (_spanSize.text != text) _spanSize.text = text;
+  }
+
+  /// True while a formatting action must not touch the document: the hidden
+  /// note is being revealed, or the body is read-only. `_format` already
+  /// guards the reveal case; the span actions share the same rule.
+  bool get _formattingBlocked => _revealingHidden || _editorReadOnly;
+
+  /// Returns focus to the document body (or the source field in Markdown mode)
+  /// so a toolbar action keeps the current selection visibly highlighted.
+  void _refocusBody() {
+    if (_source) {
+      _sourceFocus.requestFocus();
+      return;
+    }
+    final state = _bodyEditableState();
+    if (state == null || state.widget.readOnly) return;
+    state.widget.focusNode.requestFocus();
+  }
+
+  Color _colorFromHex(String hex) {
+    final digits = hex.startsWith('#') ? hex.substring(1) : hex;
+    return Color(int.parse('FF$digits', radix: 16));
+  }
+
+  /// Applies a text color to [selection], then restores body focus.
+  void _applySpanColorTo(TextSelection selection, Color color) {
+    if (_formattingBlocked) return;
+    final result = applySpanColor(_editor.text, selection, color);
+    if (result == null) {
+      _notify(
+        tr(
+          'Zaznacz fragment tekstu, aby zmienić jego kolor.',
+          'Select some text to change its color.',
+        ),
+      );
+      _refocusBody();
+      return;
+    }
+    _editor.setValue(
+      TextEditingValue(text: result.text, selection: result.selection),
+    );
+    _refocusBody();
+  }
+
+  /// Applies a translucent highlight to [selection], then restores body focus.
+  void _applySpanHighlightTo(TextSelection selection, Color color) {
+    if (_formattingBlocked) return;
+    final result = applySpanHighlight(_editor.text, selection, color);
+    if (result == null) {
+      _notify(
+        tr(
+          'Zaznacz fragment tekstu, aby go zakreślić.',
+          'Select some text to highlight it.',
+        ),
+      );
+      _refocusBody();
+      return;
+    }
+    _editor.setValue(
+      TextEditingValue(text: result.text, selection: result.selection),
+    );
+    _refocusBody();
+  }
+
+  /// Removes the text color around [selection] and restores body focus.
+  void _clearSpanColor(TextSelection selection) {
+    if (_formattingBlocked) return;
+    final result = removeSpanColor(_editor.text, selection);
+    if (result != null) {
+      _editor.setValue(
+        TextEditingValue(text: result.text, selection: result.selection),
+      );
+    }
+    _refocusBody();
+  }
+
+  /// Removes the highlight around [selection] and restores body focus.
+  void _clearSpanHighlight(TextSelection selection) {
+    if (_formattingBlocked) return;
+    final result = removeSpanHighlight(_editor.text, selection);
+    if (result != null) {
+      _editor.setValue(
+        TextEditingValue(text: result.text, selection: result.selection),
+      );
+    }
+    _refocusBody();
+  }
+
+  /// Handles a selection from the text-color/highlight palette menu.
+  Future<void> _applyColorMenuAction(String value) async {
+    final selection = _editor.selection;
+    switch (value) {
+      case 'text-clear':
+        _clearSpanColor(selection);
+        break;
+      case 'highlight-clear':
+        _clearSpanHighlight(selection);
+        break;
+      case 'text-custom':
+        final result = await showVisualColorPicker(
+          context,
+          title: tr('Kolor tekstu', 'Text color'),
+        );
+        if (result is VisualColorValue && mounted) {
+          _applySpanColorTo(selection, result.color);
+        } else if (mounted) {
+          _refocusBody();
+        }
+        break;
+      case 'highlight-custom':
+        final result = await showVisualColorPicker(
+          context,
+          title: tr('Zakreślenie', 'Highlight'),
+        );
+        if (result is VisualColorValue && mounted) {
+          _applySpanHighlightTo(
+            selection,
+            result.color.withValues(alpha: defaultHighlightAlpha),
+          );
+        } else if (mounted) {
+          _refocusBody();
+        }
+        break;
+      default:
+        if (value.startsWith('text-')) {
+          _applySpanColorTo(selection, _colorFromHex(value.substring(5)));
+        } else if (value.startsWith('highlight-')) {
+          _applySpanHighlightTo(
+            selection,
+            _colorFromHex(value.substring('highlight-'.length))
+                .withValues(alpha: defaultHighlightAlpha),
+          );
+        }
+    }
   }
 
   RegExpMatch? get _wikiPrefix {
@@ -3871,7 +4069,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
   /// equal-width icon-only buttons with a floating label on hover. Pinned to
   /// the bottom of both sidebar variants, outside the scrollable tree.
   Widget _sidebarFooter(bool mobile) => Padding(
-    padding: const EdgeInsets.fromLTRB(10, 8, 10, 0),
+    padding: const EdgeInsets.fromLTRB(10, 8, 10, 8),
     child: Row(
       key: const Key('sidebar-footer-actions'),
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -6548,7 +6746,14 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     return _raw!;
   }
 
-  Widget _toolbar(bool mobile) => Container(
+  /// The editor toolbar. Its controls live inside a [TextFieldTapRegion] so a
+  /// click on one never counts as a tap outside the document: the body keeps
+  /// its focus and selection while the action runs, and only actions that open
+  /// a dialog/menu need `_refocusBody` afterwards.
+  Widget _toolbar(bool mobile) =>
+      TextFieldTapRegion(child: _toolbarRow(mobile));
+
+  Widget _toolbarRow(bool mobile) => Container(
     height: 42,
     decoration: const BoxDecoration(
       color: toolbarBg,
@@ -6576,6 +6781,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     contextMenuBuilder: siliqueTextContextMenu,
                     key: const Key('span-size'),
                     controller: _spanSize,
+                    focusNode: _spanSizeFocus,
                     keyboardType: TextInputType.number,
                     style: const TextStyle(fontSize: 12),
                     decoration: InputDecoration(
@@ -6601,6 +6807,8 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                     onSubmitted: (_) => _applySpanSize(),
                   ),
                 ),
+                _spanSizeStepper(),
+                _textColorMenu(),
                 if (mobile)
                   _tool(
                     Icons.emoji_emotions_outlined,
@@ -6855,7 +7063,138 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     onPressed: onTap,
     icon: Icon(icon, size: 17, color: toolbarForeground),
     tooltip: hint,
+    style: IconButton.styleFrom(
+      padding: EdgeInsets.zero,
+      minimumSize: const Size(34, 34),
+      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+      visualDensity: VisualDensity.compact,
+    ),
   );
+
+  /// Two stacked buttons that nudge the span-size value up/down by one.
+  Widget _spanSizeStepper() => Column(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      _spanSizeStep(
+        const Key('span-size-up'),
+        Icons.keyboard_arrow_up,
+        () => _nudgeSpanSize(1),
+      ),
+      _spanSizeStep(
+        const Key('span-size-down'),
+        Icons.keyboard_arrow_down,
+        () => _nudgeSpanSize(-1),
+      ),
+    ],
+  );
+
+  Widget _spanSizeStep(Key key, IconData icon, VoidCallback onTap) => Tooltip(
+    message: identical(icon, Icons.keyboard_arrow_up)
+        ? tr('Rozmiar +1 px', 'Size +1 px')
+        : tr('Rozmiar −1 px', 'Size −1 px'),
+    child: InkWell(
+      key: key,
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(4),
+      child: SizedBox(
+        // Two stacked steps must fit the 42 px toolbar row, but a 20 px wide
+        // target reads (and hits) better than the first 20×14 attempt.
+        width: 22,
+        height: 16,
+        child: Icon(icon, size: 15, color: toolbarForeground),
+      ),
+    ),
+  );
+
+  /// Palette popup with two groups: text color and translucent highlight.
+  Widget _textColorMenu() => PopupMenuButton<String>(
+    key: const Key('text-color-menu'),
+    tooltip: tr('Kolor tekstu i zakreślenie', 'Text color and highlight'),
+    icon: const Icon(
+      Icons.format_color_text,
+      size: 17,
+      color: toolbarForeground,
+    ),
+    padding: EdgeInsets.zero,
+    constraints: const BoxConstraints(minWidth: 34, minHeight: 34),
+    splashRadius: 16,
+    onSelected: _applyColorMenuAction,
+    itemBuilder: (context) => [
+      _colorMenuHeader(tr('Kolor tekstu', 'Text color')),
+      _colorMenuAction(
+        'text-clear',
+        tr('Domyślny', 'Default'),
+        icon: Icons.format_color_reset,
+      ),
+      for (final hex in _textColorHexes)
+        _colorMenuAction('text-$hex', hex, swatch: _colorFromHex(hex)),
+      _colorMenuAction(
+        'text-custom',
+        tr('Własny kolor…', 'Custom color…'),
+        icon: Icons.colorize,
+      ),
+      const PopupMenuDivider(),
+      _colorMenuHeader(tr('Zakreślenie', 'Highlight')),
+      _colorMenuAction(
+        'highlight-clear',
+        tr('Brak', 'None'),
+        icon: Icons.format_color_reset,
+      ),
+      for (final hex in _highlightHexes)
+        _colorMenuAction(
+          'highlight-$hex',
+          hex,
+          swatch: _colorFromHex(hex).withValues(alpha: defaultHighlightAlpha),
+        ),
+      _colorMenuAction(
+        'highlight-custom',
+        tr('Własny kolor…', 'Custom color…'),
+        icon: Icons.colorize,
+      ),
+    ],
+  );
+
+  PopupMenuEntry<String> _colorMenuHeader(String label) =>
+      PopupMenuItem<String>(
+        enabled: false,
+        child: Text(
+          label,
+          style: const TextStyle(fontSize: 11, fontWeight: FontWeight.w700),
+        ),
+      );
+
+  PopupMenuEntry<String> _colorMenuAction(
+    String value,
+    String label, {
+    Color? swatch,
+    IconData? icon,
+  }) => PopupMenuItem<String>(
+    value: value,
+    height: 32,
+    child: Row(
+      children: [
+        if (swatch != null)
+          _colorSwatch(swatch)
+        else if (icon != null)
+          Icon(icon, size: 16, color: muted)
+        else
+          const SizedBox(width: 16),
+        const SizedBox(width: 10),
+        Flexible(child: Text(label, overflow: TextOverflow.ellipsis)),
+      ],
+    ),
+  );
+
+  Widget _colorSwatch(Color color) => Container(
+    width: 16,
+    height: 16,
+    decoration: BoxDecoration(
+      color: color,
+      shape: BoxShape.circle,
+      border: Border.all(color: line),
+    ),
+  );
+
   Widget _bottomNav() => Container(
     constraints: const BoxConstraints(minHeight: 66),
     decoration: const BoxDecoration(

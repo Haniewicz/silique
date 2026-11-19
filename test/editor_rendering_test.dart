@@ -217,4 +217,51 @@ void main() {
       TargetPlatform.android,
     }),
   );
+
+  testWidgets('color and highlight spans render their stored styles', (
+    tester,
+  ) async {
+    const source =
+        'A <span style="color:#E53935">red</span> i '
+        '<span style="background-color:rgba(30,136,229,0.35)">blue</span>.';
+    final controller = LiveMarkdownController(
+      text: source,
+      selection: const TextSelection.collapsed(offset: source.length),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: siliqueTheme(),
+        home: Scaffold(body: LiveMarkdownEditor(controller: controller)),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    final editable = tester
+        .widgetList<EditableText>(find.byType(EditableText))
+        .firstWhere((widget) => widget.controller.text == source);
+    final span = editable.controller.buildTextSpan(
+      context: tester.element(find.byType(EditableText).first),
+      withComposing: false,
+    );
+
+    final colors = <Color?>[];
+    final backgrounds = <Color?>[];
+    void visit(InlineSpan node) {
+      if (node is TextSpan) {
+        final text = node.text ?? '';
+        if (text.contains('red')) colors.add(node.style?.color);
+        if (text.contains('blue')) {
+          backgrounds.add(node.style?.backgroundColor);
+        }
+        node.children?.forEach(visit);
+      }
+    }
+
+    visit(span);
+    expect(colors, contains(const Color(0xFFE53935)));
+    expect(backgrounds, contains(const Color(0x591E88E5)));
+
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
 }

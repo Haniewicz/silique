@@ -1660,6 +1660,8 @@ class _InlineProjectionCore {
       node.kind,
       inheritedStyle,
       fontSize: node.fontSize,
+      color: node.color,
+      backgroundColor: node.backgroundColor,
     );
     final markerStyle = reveal
         ? syntaxStyle(inheritedStyle)
@@ -2133,7 +2135,13 @@ class _InlineProjectionCore {
     }
     return _previewContentSpan(
       node,
-      _contentStyle(node.kind, inheritedStyle, fontSize: node.fontSize),
+      _contentStyle(
+        node.kind,
+        inheritedStyle,
+        fontSize: node.fontSize,
+        color: node.color,
+        backgroundColor: node.backgroundColor,
+      ),
     );
   }
 
@@ -2169,6 +2177,8 @@ class _InlineProjectionCore {
     MarkdownInlineKind kind,
     TextStyle inherited, {
     double? fontSize,
+    Color? color,
+    Color? backgroundColor,
   }) {
     return switch (kind) {
       MarkdownInlineKind.bold => inherited.copyWith(
@@ -2197,6 +2207,10 @@ class _InlineProjectionCore {
       MarkdownInlineKind.image || MarkdownInlineKind.text => inherited,
       MarkdownInlineKind.fontSize => inherited.copyWith(
         fontSize: fontSize ?? inherited.fontSize,
+      ),
+      MarkdownInlineKind.spanColor => inherited.copyWith(color: color),
+      MarkdownInlineKind.spanBackground => inherited.copyWith(
+        backgroundColor: backgroundColor,
       ),
     };
   }
@@ -2269,6 +2283,9 @@ class _InlineProjectionCore {
       titleRange: node.titleRange == null ? null : shift(node.titleRange!),
       targetRange: node.targetRange == null ? null : shift(node.targetRange!),
       aliasRange: node.aliasRange == null ? null : shift(node.aliasRange!),
+      fontSize: node.fontSize,
+      color: node.color,
+      backgroundColor: node.backgroundColor,
     );
   }
 }

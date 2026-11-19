@@ -76,6 +76,26 @@ const hoverTileShape = RoundedRectangleBorder(
   borderRadius: BorderRadius.all(Radius.circular(hoverRadius)),
 );
 
+/// The corner radius of the hover surface for Settings-section rows.
+///
+/// Slightly larger than [hoverRadius] (folder rows) so a hover reads clearly
+/// against the settings page background without changing the folder-row look.
+const settingsItemRadius = 8.0;
+
+/// The rounded hover surface of Settings-section rows. Used in place of
+/// [hoverTileShape] for `ListTile`/`SwitchListTile`/`CheckboxListTile` inside
+/// the Settings panel; folder rows keep [hoverRadius]/[hoverTileShape].
+const settingsItemShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(settingsItemRadius)),
+);
+
+/// Horizontal content inset of Settings-section rows so their content is not
+/// flush against the panel edge.
+const settingsItemPadding = EdgeInsets.symmetric(horizontal: 10);
+
+/// Vertical gap between Settings-section rows.
+const settingsItemGap = 4.0;
+
 /// Folder glyph tint when the folder carries no explicit accent.
 const folderIcon = Color(0xff8fa6de);
 

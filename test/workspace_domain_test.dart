@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:ui' show Color;
 
 import 'package:flutter/services.dart' show TextSelection;
 import 'package:flutter_test/flutter_test.dart';
@@ -7,6 +8,7 @@ import 'package:livemd_flutter/livemd_flutter.dart';
 import 'package:silique/core/models.dart';
 import 'package:silique/core/search.dart';
 import 'package:silique/core/span_size.dart';
+import 'package:silique/core/span_color.dart';
 import 'package:silique/core/workspace.dart';
 import 'package:silique/services/notebook.dart';
 import 'package:silique/storage/native_storage.dart';
@@ -199,6 +201,190 @@ void main() {
       expect(controller.text, 'Zaznaczony tekst');
       controller.redo();
       expect(controller.text, contains('font-size:28px'));
+    });
+  });
+
+  group('inline color and highlight', () {
+    test('wraps only the selection and keeps the rest untouched', () {
+      const text = 'Ala ma kota, a kot ma Alę.';
+      final result = applySpanColor(
+        text,
+        const TextSelection(baseOffset: 7, extentOffset: 11),
+        const Color(0xFFE53935),
+      )!;
+      expect(
+        result.text,
+        'Ala ma <span style="color:#E53935">kota</span>, a kot ma Alę.',
+      );
+      expect(result.selection.textInside(result.text), 'kota');
+      expect(
+        spanColorAt(result.text, result.selection),
+        const Color(0xFFE53935),
+      );
+
+      // Applying again rewrites the run instead of nesting a second span.
+      final again = applySpanColor(
+        result.text,
+        result.selection,
+        const Color(0xFF1E88E5),
+      )!;
+      expect(again.text, contains('color:#1E88E5'));
+      expect('<span style'.allMatches(again.text), hasLength(1));
+      expect(spanColorAt(again.text, again.selection), const Color(0xFF1E88E5));
+    });
+
+    test('highlight round-trips a translucent rgba color', () {
+      const text = 'zakreśl to';
+      final highlight = const Color(0xFF1E88E5).withValues(alpha: 0.35);
+      final result = applySpanHighlight(
+        text,
+        const TextSelection(baseOffset: 0, extentOffset: text.length),
+        highlight,
+      )!;
+      expect(
+        result.text,
+        '<span style="background-color:rgba(30,136,229,0.35)">zakreśl to</span>',
+      );
+      final read = spanHighlightAt(result.text, result.selection);
+      expect(read, isNotNull);
+      expect(read!.toARGB32() & 0xFFFFFF, 0x1E88E5);
+      expect((read.a - 0.35).abs(), lessThan(0.01));
+    });
+
+    test(
+      'wraps every line of a multi-line selection and skips empty lines',
+      () {
+        const text = 'pierwsza\n\ndruga linia';
+        final result = applySpanColor(
+          text,
+          const TextSelection(baseOffset: 0, extentOffset: text.length),
+          const Color(0xFF43A047),
+        )!;
+        expect('<span'.allMatches(result.text), hasLength(2));
+        expect(result.text, contains('color:#43A047">pierwsza</span>'));
+        expect(result.text, contains('color:#43A047">druga linia</span>'));
+        expect(result.text, contains('\n\n'));
+      },
+    );
+
+    test('never formats without a selection', () {
+      expect(
+        applySpanColor(
+          'abc',
+          const TextSelection.collapsed(offset: 1),
+          const Color(0xFF000000),
+        ),
+        isNull,
+      );
+      expect(
+        applySpanHighlight(
+          'abc',
+          const TextSelection.collapsed(offset: 1),
+          const Color(0xFF000000),
+        ),
+        isNull,
+      );
+    });
+
+    test('removes a color span exactly wrapping the selection', () {
+      const source = 'Ala ma <span style="color:#E53935">kota</span>!';
+      final start = source.indexOf('kota');
+      final result = removeSpanColor(
+        source,
+        TextSelection(baseOffset: start, extentOffset: start + 4),
+      )!;
+      expect(result.text, 'Ala ma kota!');
+      expect(result.selection.textInside(result.text), 'kota');
+    });
+
+    test('vendor parser recognizes color and background spans', () {
+      const source =
+          'A <span style="color:#E53935">red</span> i '
+          '<span style="background-color:rgba(30,136,229,0.35)">blue</span>.';
+      final tree = const MarkdownSyntaxParser().parse(source);
+      final color = tree.lines.single.inlines
+          .where((n) => n.kind == MarkdownInlineKind.spanColor)
+          .single;
+      expect(color.color, const Color(0xFFE53935));
+      expect(
+        source.substring(color.contentRange.start, color.contentRange.end),
+        'red',
+      );
+
+      final background = tree.lines.single.inlines
+          .where((n) => n.kind == MarkdownInlineKind.spanBackground)
+          .single;
+      expect(background.backgroundColor, isNotNull);
+      expect(background.backgroundColor!.toARGB32() & 0xFFFFFF, 0x1E88E5);
+      expect(
+        source.substring(
+          background.contentRange.start,
+          background.contentRange.end,
+        ),
+        'blue',
+      );
+    });
+
+    test('vendor parser keeps unsupported span properties literal', () {
+      const source = 'A <span style="border:1px">x</span> B';
+      final tree = const MarkdownSyntaxParser().parse(source);
+      expect(
+        tree.lines.single.inlines.where(
+          (n) => n.kind == MarkdownInlineKind.spanColor,
+        ),
+        isEmpty,
+      );
+      expect(
+        tree.lines.single.inlines.where(
+          (n) => n.kind == MarkdownInlineKind.spanBackground,
+        ),
+        isEmpty,
+      );
+    });
+
+    test('a hand-edited spaced color tag is detected and removable', () {
+      const source = 'A <span style="color: #E53935">red</span> B';
+      final start = source.indexOf('red');
+      final selection = TextSelection(
+        baseOffset: start,
+        extentOffset: start + 3,
+      );
+      expect(spanColorAt(source, selection), const Color(0xFFE53935));
+      expect(removeSpanColor(source, selection)!.text, 'A red B');
+    });
+
+    test('an out-of-range rgba component clamps instead of wrapping', () {
+      const source =
+          'A <span style="background-color:rgba(256,0,0,0.35)">x</span> B';
+      final start = source.indexOf('>x<') + 1;
+      final selection = TextSelection(
+        baseOffset: start,
+        extentOffset: start + 1,
+      );
+      // Clamping is the documented rule on both sides: 256 becomes 255, never
+      // 0 (which is what `256 & 0xFF` would produce).
+      final detected = spanHighlightAt(source, selection)!;
+      expect(detected.toARGB32() & 0xFFFFFF, 0xFF0000);
+      final tree = const MarkdownSyntaxParser().parse(source);
+      final background = tree.lines.single.inlines
+          .where((n) => n.kind == MarkdownInlineKind.spanBackground)
+          .single;
+      expect(background.backgroundColor!.toARGB32() & 0xFFFFFF, 0xFF0000);
+    });
+
+    test('a literal nested span does not end the outer colored run early', () {
+      const source =
+          'A <span style="color:#E53935">red '
+          '<span style="border:1px">x</span> y</span> B';
+      final tree = const MarkdownSyntaxParser().parse(source);
+      final color = tree.lines.single.inlines
+          .where((n) => n.kind == MarkdownInlineKind.spanColor)
+          .single;
+      expect(color.color, const Color(0xFFE53935));
+      expect(
+        source.substring(color.contentRange.start, color.contentRange.end),
+        'red <span style="border:1px">x</span> y',
+      );
     });
   });
 

@@ -1023,19 +1023,24 @@ class _SettingsPanelState extends State<SettingsPanel> {
               p['envelope'] == null &&
               (p['approverId'] == null || p['approverId'] == repo.deviceId),
         ))
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.phonelink_lock),
-            title: Text(
-              tr(
-                'Urządzenie ${(p['requesterId'] as String).substring(0, 8)}',
-                'Device ${(p['requesterId'] as String).substring(0, 8)}',
+          _settingsRowGap(
+            ListTile(
+              // Informational row: no `onTap`, so no hover surface — but the
+              // left inset matches every clickable settings row so the section
+              // keeps one text edge.
+              contentPadding: settingsItemPadding,
+              leading: const Icon(Icons.phonelink_lock),
+              title: Text(
+                tr(
+                  'Urządzenie ${(p['requesterId'] as String).substring(0, 8)}',
+                  'Device ${(p['requesterId'] as String).substring(0, 8)}',
+                ),
+                style: const TextStyle(fontSize: 13),
               ),
-              style: const TextStyle(fontSize: 13),
-            ),
-            trailing: TextButton(
-              onPressed: busy ? null : () => approve(p),
-              child: Text(tr('Porównaj kod', 'Compare code')),
+              trailing: TextButton(
+                onPressed: busy ? null : () => approve(p),
+                child: Text(tr('Porównaj kod', 'Compare code')),
+              ),
             ),
           ),
       ],
@@ -1255,20 +1260,22 @@ class _SettingsPanelState extends State<SettingsPanel> {
               ? null
               : (value) => run(() => repo.setHiddenAutoLock(value)),
         ),
-        SwitchListTile(
-          key: const Key('hidden-lock-background'),
-          contentPadding: EdgeInsets.zero,
-          shape: hoverTileShape,
-          value: repo.hiddenLockOnBackground,
-          onChanged: busy
-              ? null
-              : (value) => run(() => repo.setHiddenLockOnBackground(value)),
-          title: Text(
-            tr(
-              'Blokuj po przejściu aplikacji w tło',
-              'Lock when the app goes into the background',
+        _settingsRowGap(
+          SwitchListTile(
+            key: const Key('hidden-lock-background'),
+            contentPadding: settingsItemPadding,
+            shape: settingsItemShape,
+            value: repo.hiddenLockOnBackground,
+            onChanged: busy
+                ? null
+                : (value) => run(() => repo.setHiddenLockOnBackground(value)),
+            title: Text(
+              tr(
+                'Blokuj po przejściu aplikacji w tło',
+                'Lock when the app goes into the background',
+              ),
+              style: TextStyle(fontSize: 12),
             ),
-            style: TextStyle(fontSize: 12),
           ),
         ),
       ],
@@ -1553,25 +1560,27 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
           const SizedBox(height: 8),
           for (final v in repo.vaults)
-            SwitchListTile(
-              contentPadding: EdgeInsets.zero,
-              shape: hoverTileShape,
-              value: v.syncEnabled,
-              onChanged: busy
-                  ? null
-                  : (enabled) => run(
-                      () => _serverAction(() async {
-                        if (enabled) {
-                          await repo.enableSync(v);
-                          await repo.sync();
-                        } else {
-                          v.syncEnabled = false;
-                          repo.storage.putVault(v);
-                        }
-                      }),
-                    ),
-              title: Text(v.name, style: const TextStyle(fontSize: 14)),
-              subtitle: _vaultSyncSubtitle(v),
+            _settingsRowGap(
+              SwitchListTile(
+                contentPadding: settingsItemPadding,
+                shape: settingsItemShape,
+                value: v.syncEnabled,
+                onChanged: busy
+                    ? null
+                    : (enabled) => run(
+                        () => _serverAction(() async {
+                          if (enabled) {
+                            await repo.enableSync(v);
+                            await repo.sync();
+                          } else {
+                            v.syncEnabled = false;
+                            repo.storage.putVault(v);
+                          }
+                        }),
+                      ),
+                title: Text(v.name, style: const TextStyle(fontSize: 14)),
+                subtitle: _vaultSyncSubtitle(v),
+              ),
             ),
           const SizedBox(height: 20),
           Row(
@@ -1596,123 +1605,131 @@ class _SettingsPanelState extends State<SettingsPanel> {
           ),
           if (devices != null)
             for (final device in devices!)
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                leading: const Icon(Icons.devices_outlined),
-                title: Text(
-                  '${device['name']}${device['id'] == repo.deviceId ? tr(' (to urządzenie)', ' (this device)') : ''}',
-                  style: const TextStyle(fontSize: 13),
-                ),
-                subtitle: Text(
-                  '${(device['id'] as String).substring(0, 8)} • ${device['revoked'] == 1 ? tr('dostęp cofnięty', 'access revoked') : tr('aktywne', 'active')}',
-                  style: const TextStyle(fontSize: 11),
-                ),
-                trailing: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    if (device['revoked'] != 1 && device['id'] == repo.deviceId)
-                      IconButton(
-                        key: const Key('device-rename'),
-                        tooltip: tr(
-                          'Zmień nazwę tego urządzenia',
-                          'Rename this device',
+              _settingsRowGap(
+                ListTile(
+                  // Informational row (actions live in the trailing icons):
+                  // same left inset as the clickable settings rows so the
+                  // section keeps one text edge. No hover surface.
+                  contentPadding: settingsItemPadding,
+                  leading: const Icon(Icons.devices_outlined),
+                  title: Text(
+                    '${device['name']}${device['id'] == repo.deviceId ? tr(' (to urządzenie)', ' (this device)') : ''}',
+                    style: const TextStyle(fontSize: 13),
+                  ),
+                  subtitle: Text(
+                    '${(device['id'] as String).substring(0, 8)} • ${device['revoked'] == 1 ? tr('dostęp cofnięty', 'access revoked') : tr('aktywne', 'active')}',
+                    style: const TextStyle(fontSize: 11),
+                  ),
+                  trailing: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (device['revoked'] != 1 &&
+                          device['id'] == repo.deviceId)
+                        IconButton(
+                          key: const Key('device-rename'),
+                          tooltip: tr(
+                            'Zmień nazwę tego urządzenia',
+                            'Rename this device',
+                          ),
+                          icon: const Icon(Icons.edit_outlined, size: 18),
+                          onPressed: busy
+                              ? null
+                              : () async {
+                                  final name = await askText(
+                                    context,
+                                    '',
+                                    titleBuilder: () => tr(
+                                      'Nazwa tego urządzenia',
+                                      'This device’s name',
+                                    ),
+                                    initial: device['name'] as String? ?? '',
+                                    hintBuilder: () =>
+                                        tr('1–80 znaków', '1–80 characters'),
+                                  );
+                                  if (name == null) return;
+                                  await run(
+                                    () => _serverAction(() async {
+                                      final saved = await repo.renameDevice(
+                                        device['id'] as String,
+                                        name,
+                                      );
+                                      await repo.refreshDevices();
+                                      message = () => tr(
+                                        'Nazwa urządzenia zapisana na serwerze: $saved',
+                                        'Device name saved on the server: $saved',
+                                      );
+                                    }),
+                                  );
+                                },
                         ),
-                        icon: const Icon(Icons.edit_outlined, size: 18),
-                        onPressed: busy
-                            ? null
-                            : () async {
-                                final name = await askText(
-                                  context,
-                                  '',
-                                  titleBuilder: () => tr(
-                                    'Nazwa tego urządzenia',
-                                    'This device’s name',
-                                  ),
-                                  initial: device['name'] as String? ?? '',
-                                  hintBuilder: () =>
-                                      tr('1–80 znaków', '1–80 characters'),
-                                );
-                                if (name == null) return;
-                                await run(
+                      if (device['revoked'] != 1)
+                        IconButton(
+                          tooltip: tr('Cofnij dostęp', 'Revoke access'),
+                          icon: const Icon(Icons.block, size: 18),
+                          onPressed: busy
+                              ? null
+                              : () => run(
                                   () => _serverAction(() async {
-                                    final saved = await repo.renameDevice(
-                                      device['id'] as String,
-                                      name,
-                                    );
-                                    await repo.refreshDevices();
-                                    message = () => tr(
-                                      'Nazwa urządzenia zapisana na serwerze: $saved',
-                                      'Device name saved on the server: $saved',
-                                    );
-                                  }),
-                                );
-                              },
-                      ),
-                    if (device['revoked'] != 1)
-                      IconButton(
-                        tooltip: tr('Cofnij dostęp', 'Revoke access'),
-                        icon: const Icon(Icons.block, size: 18),
-                        onPressed: busy
-                            ? null
-                            : () => run(
-                                () => _serverAction(() async {
-                                  final confirmed = await showDialog<bool>(
-                                    context: context,
-                                    builder: (ctx) => ListenableBuilder(
-                                      listenable: appLanguage,
-                                      builder: (ctx, _) => AlertDialog(
-                                        title: Text(
-                                          tr(
-                                            'Cofnąć dostęp urządzeniu?',
-                                            'Revoke device access?',
-                                          ),
-                                        ),
-                                        content: Text(
-                                          tr(
-                                            'Urządzenie utraci synchronizację. Wcześniej pobrane dane pozostaną na nim.',
-                                            'The device will lose sync access. Previously downloaded data will remain on it.',
-                                          ),
-                                        ),
-                                        actions: [
-                                          TextButton(
-                                            onPressed: () =>
-                                                Navigator.pop(ctx, false),
-                                            child: Text(tr('Anuluj', 'Cancel')),
-                                          ),
-                                          FilledButton(
-                                            onPressed: () =>
-                                                Navigator.pop(ctx, true),
-                                            child: Text(
-                                              tr(
-                                                'Cofnij dostęp',
-                                                'Revoke access',
-                                              ),
+                                    final confirmed = await showDialog<bool>(
+                                      context: context,
+                                      builder: (ctx) => ListenableBuilder(
+                                        listenable: appLanguage,
+                                        builder: (ctx, _) => AlertDialog(
+                                          title: Text(
+                                            tr(
+                                              'Cofnąć dostęp urządzeniu?',
+                                              'Revoke device access?',
                                             ),
                                           ),
-                                        ],
+                                          content: Text(
+                                            tr(
+                                              'Urządzenie utraci synchronizację. Wcześniej pobrane dane pozostaną na nim.',
+                                              'The device will lose sync access. Previously downloaded data will remain on it.',
+                                            ),
+                                          ),
+                                          actions: [
+                                            TextButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(ctx, false),
+                                              child: Text(
+                                                tr('Anuluj', 'Cancel'),
+                                              ),
+                                            ),
+                                            FilledButton(
+                                              onPressed: () =>
+                                                  Navigator.pop(ctx, true),
+                                              child: Text(
+                                                tr(
+                                                  'Cofnij dostęp',
+                                                  'Revoke access',
+                                                ),
+                                              ),
+                                            ),
+                                          ],
+                                        ),
                                       ),
-                                    ),
-                                  );
-                                  if (confirmed != true) return;
-                                  await repo.api!.request(
-                                    'DELETE',
-                                    '/v1/devices/${device['id']}',
-                                  );
-                                  if (device['id'] == repo.deviceId) {
-                                    await repo.disconnect();
-                                    devices = null;
-                                  } else {
-                                    devices = devices
-                                        ?.where(
-                                          (entry) =>
-                                              entry['id'] != device['id'],
-                                        )
-                                        .toList();
-                                  }
-                                }),
-                              ),
-                      ),
-                  ],
+                                    );
+                                    if (confirmed != true) return;
+                                    await repo.api!.request(
+                                      'DELETE',
+                                      '/v1/devices/${device['id']}',
+                                    );
+                                    if (device['id'] == repo.deviceId) {
+                                      await repo.disconnect();
+                                      devices = null;
+                                    } else {
+                                      devices = devices
+                                          ?.where(
+                                            (entry) =>
+                                                entry['id'] != device['id'],
+                                          )
+                                          .toList();
+                                    }
+                                  }),
+                                ),
+                        ),
+                    ],
+                  ),
                 ),
               ),
         ],
@@ -1840,10 +1857,10 @@ class _SettingsPanelState extends State<SettingsPanel> {
     final spec = _sections[_mobileSection!];
     return Material(
       color: Colors.transparent,
-      borderRadius: BorderRadius.circular(hoverRadius),
+      borderRadius: BorderRadius.circular(settingsItemRadius),
       child: InkWell(
         key: const Key('settings-back-to-list'),
-        borderRadius: BorderRadius.circular(hoverRadius),
+        borderRadius: BorderRadius.circular(settingsItemRadius),
         onTap: () => setState(() => _mobileSection = null),
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
@@ -1880,9 +1897,9 @@ class _SettingsPanelState extends State<SettingsPanel> {
       child: Material(
         key: spec.key,
         color: selected ? accent.withValues(alpha: .10) : Colors.transparent,
-        borderRadius: BorderRadius.circular(hoverRadius),
+        borderRadius: BorderRadius.circular(settingsItemRadius),
         child: InkWell(
-          borderRadius: BorderRadius.circular(hoverRadius),
+          borderRadius: BorderRadius.circular(settingsItemRadius),
           onTap: () => setState(() {
             _section = index;
             _mobileSection = index;
@@ -1942,30 +1959,34 @@ class _SettingsPanelState extends State<SettingsPanel> {
     final argb = target == null
         ? kDefaultNoteColor
         : repo.defaultNoteColorOf(target.id);
-    return ListTile(
-      key: const Key('appearance-default-note-color'),
-      contentPadding: EdgeInsets.zero,
-      shape: hoverTileShape,
-      leading: _colorSwatch(argb),
-      title: Text(tr('Domyślny kolor nowych notatek', 'Default note color')),
-      subtitle: Text(_hexText(argb)),
-      onTap: busy || target == null ? null : () => _pickDefaultNoteColor(),
+    return _settingsRowGap(
+      ListTile(
+        key: const Key('appearance-default-note-color'),
+        contentPadding: settingsItemPadding,
+        shape: settingsItemShape,
+        leading: _colorSwatch(argb),
+        title: Text(tr('Domyślny kolor nowych notatek', 'Default note color')),
+        subtitle: Text(_hexText(argb)),
+        onTap: busy || target == null ? null : () => _pickDefaultNoteColor(),
+      ),
     );
   }
 
   Widget _defaultFolderColorTile() {
     final target = _compactVault;
     final argb = target == null ? null : repo.defaultFolderColorOf(target.id);
-    return ListTile(
-      key: const Key('appearance-default-folder-color'),
-      contentPadding: EdgeInsets.zero,
-      shape: hoverTileShape,
-      leading: _colorSwatch(argb),
-      title: Text(tr('Domyślny kolor folderów', 'Default folder color')),
-      subtitle: Text(
-        argb == null ? tr('Brak koloru', 'No color') : _hexText(argb),
+    return _settingsRowGap(
+      ListTile(
+        key: const Key('appearance-default-folder-color'),
+        contentPadding: settingsItemPadding,
+        shape: settingsItemShape,
+        leading: _colorSwatch(argb),
+        title: Text(tr('Domyślny kolor folderów', 'Default folder color')),
+        subtitle: Text(
+          argb == null ? tr('Brak koloru', 'No color') : _hexText(argb),
+        ),
+        onTap: busy || target == null ? null : () => _pickDefaultFolderColor(),
       ),
-      onTap: busy || target == null ? null : () => _pickDefaultFolderColor(),
     );
   }
 
@@ -2087,11 +2108,11 @@ class _SettingsPanelState extends State<SettingsPanel> {
   Widget _shortcutTile(ShortcutAction action) {
     final binding = deviceSettings.bindingOf(action);
     return Container(
-      margin: const EdgeInsets.only(bottom: 8),
+      margin: const EdgeInsets.only(bottom: settingsItemGap),
       padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
       decoration: BoxDecoration(
         border: Border.all(color: line),
-        borderRadius: BorderRadius.circular(9),
+        borderRadius: BorderRadius.circular(settingsItemRadius),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.max,
@@ -2317,26 +2338,31 @@ class _SettingsPanelState extends State<SettingsPanel> {
   }
 
   Widget _templatesFolderTile() {
-    return SwitchListTile(
-      key: const Key('templates-folder-hidden-toggle'),
-      contentPadding: EdgeInsets.zero,
-      shape: hoverTileShape,
-      value: deviceSettings.hideTemplatesFolder,
-      onChanged: (value) {
-        unawaited(deviceSettings.setHideTemplatesFolder(value));
-      },
-      title: Text(
-        tr('Ukryj folder $templatesFolder', 'Hide the $templatesFolder folder'),
-        style: const TextStyle(fontSize: 14),
-      ),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(
+    return _settingsRowGap(
+      SwitchListTile(
+        key: const Key('templates-folder-hidden-toggle'),
+        contentPadding: settingsItemPadding,
+        shape: settingsItemShape,
+        value: deviceSettings.hideTemplatesFolder,
+        onChanged: (value) {
+          unawaited(deviceSettings.setHideTemplatesFolder(value));
+        },
+        title: Text(
           tr(
-            'Folder $templatesFolder jest wbudowany — można go ukryć w drzewie, ale nie usunąć.',
-            'The $templatesFolder folder is built in — you can hide it from the tree, but not delete it.',
+            'Ukryj folder $templatesFolder',
+            'Hide the $templatesFolder folder',
           ),
-          style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
+          style: const TextStyle(fontSize: 14),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            tr(
+              'Folder $templatesFolder jest wbudowany — można go ukryć w drzewie, ale nie usunąć.',
+              'The $templatesFolder folder is built in — you can hide it from the tree, but not delete it.',
+            ),
+            style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
+          ),
         ),
       ),
     );
@@ -2344,26 +2370,28 @@ class _SettingsPanelState extends State<SettingsPanel> {
 
   Widget _compactModeTile() {
     final target = _compactVault;
-    return SwitchListTile(
-      key: const Key('compact-mode-toggle'),
-      contentPadding: EdgeInsets.zero,
-      shape: hoverTileShape,
-      value: target != null && repo.compactModeOf(target.id),
-      onChanged: busy || target == null
-          ? null
-          : (value) => run(() => repo.setCompactMode(target, value)),
-      title: Text(
-        tr('Tryb kompaktowy', 'Compact mode'),
-        style: const TextStyle(fontSize: 14),
-      ),
-      subtitle: Padding(
-        padding: const EdgeInsets.only(top: 4),
-        child: Text(
-          tr(
-            'Łączy listę folderów i listę notatek w jedną hierarchiczną listę — notatki są widoczne bezpośrednio w swoich folderach i podfolderach.',
-            'Merges the folder list and the note list into one hierarchical list — notes appear directly inside their folders and subfolders.',
+    return _settingsRowGap(
+      SwitchListTile(
+        key: const Key('compact-mode-toggle'),
+        contentPadding: settingsItemPadding,
+        shape: settingsItemShape,
+        value: target != null && repo.compactModeOf(target.id),
+        onChanged: busy || target == null
+            ? null
+            : (value) => run(() => repo.setCompactMode(target, value)),
+        title: Text(
+          tr('Tryb kompaktowy', 'Compact mode'),
+          style: const TextStyle(fontSize: 14),
+        ),
+        subtitle: Padding(
+          padding: const EdgeInsets.only(top: 4),
+          child: Text(
+            tr(
+              'Łączy listę folderów i listę notatek w jedną hierarchiczną listę — notatki są widoczne bezpośrednio w swoich folderach i podfolderach.',
+              'Merges the folder list and the note list into one hierarchical list — notes appear directly inside their folders and subfolders.',
+            ),
+            style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
           ),
-          style: const TextStyle(color: muted, fontSize: 12, height: 1.4),
         ),
       ),
     );
@@ -2377,6 +2405,14 @@ class _SectionSpec {
   final IconData icon;
   final String label;
 }
+
+/// Adds the shared vertical gap below a Settings-section row. Rows carry their
+/// own [settingsItemPadding] / [settingsItemShape]; this helper keeps the
+/// spacing between rows uniform without widening the page's own padding.
+Widget _settingsRowGap(Widget child) => Padding(
+  padding: const EdgeInsets.only(bottom: settingsItemGap),
+  child: child,
+);
 
 /// A scrollable settings tab page that stays alive once visited, so its
 /// fields, scroll offset and element states survive tab switches and the

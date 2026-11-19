@@ -82,7 +82,7 @@ void _expectRoundedHover(ShapeBorder? shape, String reason) {
   final border = shape! as RoundedRectangleBorder;
   expect(
     border.borderRadius,
-    BorderRadius.circular(hoverRadius),
+    BorderRadius.circular(settingsItemRadius),
     reason: reason,
   );
 }

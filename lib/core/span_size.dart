@@ -14,12 +14,13 @@ final _openTag = RegExp(r'<span style="font-size:(\d{1,2}(?:\.\d)?)px">');
 /// Markdown, survives every existing storage, sync, export and import path as
 /// plain note text, and is rendered by the bundled `livemd_flutter` editor.
 String openSpanFontSizeTag(num size) =>
-    '<span style="font-size:${_formatSize(size)}px">';
+    '<span style="font-size:${formatSpanFontSize(size)}px">';
 
 /// Closing marker paired with [openSpanFontSizeTag].
 const closeSpanFontSizeTag = '</span>';
 
-String _formatSize(num size) {
+/// Formats [size] as a whole number or one decimal place, clamped to 8–72.
+String formatSpanFontSize(num size) {
   final value = size.clamp(minSpanFontSize, maxSpanFontSize).toDouble();
   return value == value.roundToDouble()
       ? value.toStringAsFixed(0)

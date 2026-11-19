@@ -781,4 +781,94 @@ void main() {
       repo.api!.close();
     },
   );
+
+  testWidgets('span-size up/down steps and applies live', (tester) async {
+    final repo = (await tester.runAsync(seed))!;
+    await mount(tester, repo, const Size(1380, 880));
+    await tester.tap(card(repo, 'Delta'));
+    await tester.pumpAndSettle();
+    await openSourceMode(tester);
+    final source = tester.widget<TextField>(
+      find.byKey(const Key('source-editor')),
+    );
+    source.controller!.selection = const TextSelection(
+      baseOffset: 0,
+      extentOffset: 7,
+    );
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byKey(const Key('span-size')), '24');
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('span-size-up')));
+    await tester.pumpAndSettle();
+    expect(
+      source.controller!.text,
+      '<span style="font-size:25px">czwarta</span> notatka',
+    );
+
+    await tester.tap(find.byKey(const Key('span-size-down')));
+    await tester.pumpAndSettle();
+    expect(
+      source.controller!.text,
+      '<span style="font-size:24px">czwarta</span> notatka',
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('a bold toolbar action keeps the selection and restores focus', (
+    tester,
+  ) async {
+    final repo = (await tester.runAsync(seed))!;
+    await mount(tester, repo, const Size(1380, 880));
+    await tester.tap(card(repo, 'Delta'));
+    await tester.pumpAndSettle();
+    await openSourceMode(tester);
+    final source = tester.widget<TextField>(
+      find.byKey(const Key('source-editor')),
+    );
+    source.controller!.selection = const TextSelection(
+      baseOffset: 0,
+      extentOffset: 7,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byTooltip('Pogrubienie'));
+    await tester.pumpAndSettle();
+    expect(source.controller!.text, '**czwarta** notatka');
+    expect(source.controller!.selection.baseOffset, 2);
+    expect(source.controller!.selection.extentOffset, 9);
+    expect(source.focusNode!.hasFocus, isTrue);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
+
+  testWidgets('the text color menu applies a color to the selection', (
+    tester,
+  ) async {
+    final repo = (await tester.runAsync(seed))!;
+    await mount(tester, repo, const Size(1380, 880));
+    await tester.tap(card(repo, 'Delta'));
+    await tester.pumpAndSettle();
+    await openSourceMode(tester);
+    final source = tester.widget<TextField>(
+      find.byKey(const Key('source-editor')),
+    );
+    source.controller!.selection = const TextSelection(
+      baseOffset: 0,
+      extentOffset: 7,
+    );
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.byKey(const Key('text-color-menu')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('#E53935'));
+    await tester.pumpAndSettle();
+    expect(
+      source.controller!.text,
+      '<span style="color:#E53935">czwarta</span> notatka',
+    );
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox());
+  });
 }

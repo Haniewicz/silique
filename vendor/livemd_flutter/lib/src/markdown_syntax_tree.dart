@@ -1,3 +1,5 @@
+import 'dart:ui' show Color;
+
 /// A half-open UTF-16 code-unit range in the original Markdown source.
 ///
 /// Dart string offsets and Flutter text editing offsets are both UTF-16 code
@@ -76,8 +78,15 @@ enum MarkdownInlineKind {
   link,
   wikiLink,
   image,
+
   /// Inline `<span style="font-size:Npx">…</span>` run with a stored size.
   fontSize,
+
+  /// Inline `<span style="color:#RRGGBB">…</span>` run with a stored color.
+  spanColor,
+
+  /// Inline `<span style="background-color:rgba(…)">…</span>` highlight run.
+  spanBackground,
 }
 
 /// A lossless Markdown document rooted in [source].
@@ -186,6 +195,8 @@ class MarkdownInlineNode implements MarkdownSyntaxNode {
     this.targetRange,
     this.aliasRange,
     this.fontSize,
+    this.color,
+    this.backgroundColor,
   }) : delimiterRanges = List.unmodifiable(delimiterRanges),
        inlines = List.unmodifiable(children);
 
@@ -220,6 +231,12 @@ class MarkdownInlineNode implements MarkdownSyntaxNode {
   /// Requested font size in logical pixels for a [MarkdownInlineKind.fontSize]
   /// run; always within 8–72.
   final double? fontSize;
+
+  /// Text color for a [MarkdownInlineKind.spanColor] run.
+  final Color? color;
+
+  /// Translucent background for a [MarkdownInlineKind.spanBackground] run.
+  final Color? backgroundColor;
 
   @override
   List<MarkdownSyntaxNode> get children => inlines;
@@ -605,7 +622,7 @@ class _InlineParser {
           _sameCharacterRunLength(source, cursor, end) == 2) {
         node = _pairedAt(cursor, end, '==', MarkdownInlineKind.highlight);
       } else if (codeUnit == _lessThan) {
-        node = _fontSizeAt(cursor, end);
+        node = _spanAt(cursor, end);
       }
 
       if (node == null) {
@@ -657,30 +674,34 @@ class _InlineParser {
     );
   }
 
-  /// Recognizes `<span style="font-size:Npx">…</span>` with 8 ≤ N ≤ 72.
+  /// Recognizes `<span style="…">…</span>` whose `style` attribute contains only
+  /// whitelisted properties: `font-size:Npx` (8 ≤ N ≤ 72), `color:#RRGGBB`, and
+  /// `background-color:rgba(R,G,B,A)` (A in 0..1 with at most two decimals).
   ///
-  /// Only this exact inline HTML form is treated as formatting; any other HTML
-  /// stays literal text. Nested runs are balanced by depth, so re-formatting a
-  /// part of an existing run still renders both sizes correctly. The closing
-  /// tag must be on the same physical line; the application wraps multi-line
-  /// selections line by line for that reason.
-  MarkdownInlineNode? _fontSizeAt(int start, int end) {
-    final open = _fontSizeOpenTag.matchAsPrefix(source, start);
+  /// Any other inline HTML stays literal text. Nested whitelisted runs are
+  /// balanced by depth, so re-formatting a part of an existing run still
+  /// renders both levels correctly. The closing tag must be on the same
+  /// physical line; the application wraps multi-line selections line by line
+  /// for that reason.
+  MarkdownInlineNode? _spanAt(int start, int end) {
+    final open = _spanOpenTag.matchAsPrefix(source, start);
     if (open == null || open.end >= end) return null;
-    final size = double.tryParse(open.group(1)!);
-    if (size == null || size < 8 || size > 72) return null;
+    final style = _parseSpanStyle(open.group(1)!);
+    if (style == null || style.isEmpty) return null;
     var depth = 1;
     var cursor = open.end;
     var close = -1;
     while (cursor < end) {
-      final openIndex = source.indexOf(_fontSizeOpenPrefix, cursor);
+      final openIndex = _nextSpanOpen(cursor, end);
       final closeIndex = source.indexOf(_fontSpanClose, cursor);
       if (closeIndex < 0 || closeIndex + _fontSpanClose.length > end) {
         return null;
       }
       if (openIndex >= 0 && openIndex < closeIndex) {
         depth++;
-        cursor = openIndex + _fontSizeOpenPrefix.length;
+        // Any `<span` opener counts, so advance past the tag name only; the
+        // matched opener may be a bare `<span>` without a style attribute.
+        cursor = openIndex + _spanTagPrefix.length;
         continue;
       }
       depth--;
@@ -693,7 +714,11 @@ class _InlineParser {
     if (close < 0 || close == open.end) return null;
     final contentRange = SourceRange(open.end, close);
     return MarkdownInlineNode(
-      kind: MarkdownInlineKind.fontSize,
+      kind: style.fontSize != null
+          ? MarkdownInlineKind.fontSize
+          : style.color != null
+          ? MarkdownInlineKind.spanColor
+          : MarkdownInlineKind.spanBackground,
       fullRange: SourceRange(start, close + _fontSpanClose.length),
       contentRange: contentRange,
       delimiterRanges: [
@@ -701,8 +726,20 @@ class _InlineParser {
         SourceRange(close, close + _fontSpanClose.length),
       ],
       children: parse(contentRange.start, contentRange.end),
-      fontSize: size,
+      fontSize: style.fontSize,
+      color: style.color,
+      backgroundColor: style.backgroundColor,
     );
+  }
+
+  /// The next offset at or after [start] where any `<span` tag begins, or -1.
+  ///
+  /// Depth counting must see every nested `span` opener, including ones this
+  /// parser otherwise treats as literal text: their `</span>` still closes a
+  /// tag, so skipping them would end the outer run early.
+  int _nextSpanOpen(int start, int end) {
+    final index = source.indexOf(_spanTagPrefix, start);
+    return index >= 0 && index < end ? index : -1;
   }
 
   int? _findClosingDelimiter(int start, int end, String delimiter) {
@@ -1058,11 +1095,79 @@ class _LinkTail {
   final List<SourceRange> extraDelimiters;
 }
 
-const String _fontSizeOpenPrefix = '<span style="font-size:';
+const String _spanTagPrefix = '<span';
 const String _fontSpanClose = '</span>';
-final RegExp _fontSizeOpenTag = RegExp(
-  '${RegExp.escape(_fontSizeOpenPrefix)}(\\d{1,2}(?:\\.\\d)?)px">',
+final RegExp _spanOpenTag = RegExp(r'<span style="([^"]*)">');
+final RegExp _fontSizeProperty = RegExp(
+  r'^font-size\s*:\s*(\d{1,2}(?:\.\d)?)px$',
 );
+final RegExp _colorProperty = RegExp(r'^color\s*:\s*#([0-9a-fA-F]{6})$');
+final RegExp _backgroundColorProperty = RegExp(
+  r'^background-color\s*:\s*rgba\(\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(\d{1,3})\s*,\s*(0(?:\.\d{1,2})?|1(?:\.0{1,2})?)\s*\)$',
+);
+
+/// Parsed whitelisted `<span style="…">` properties.
+class _SpanStyle {
+  const _SpanStyle({this.fontSize, this.color, this.backgroundColor});
+
+  final double? fontSize;
+  final Color? color;
+  final Color? backgroundColor;
+
+  bool get isEmpty =>
+      fontSize == null && color == null && backgroundColor == null;
+}
+
+/// Parses a `style` attribute value into whitelisted properties, or returns
+/// `null` when any property is unsupported or malformed. Empty `;`-separated
+/// segments are ignored; a wholly empty attribute yields an empty style.
+_SpanStyle? _parseSpanStyle(String style) {
+  double? fontSize;
+  Color? color;
+  Color? backgroundColor;
+  for (final raw in style.split(';')) {
+    final part = raw.trim();
+    if (part.isEmpty) continue;
+    final sizeMatch = _fontSizeProperty.firstMatch(part);
+    if (sizeMatch != null) {
+      final size = double.tryParse(sizeMatch.group(1)!);
+      if (size == null || size < 8 || size > 72) return null;
+      fontSize = size;
+      continue;
+    }
+    final colorMatch = _colorProperty.firstMatch(part);
+    if (colorMatch != null) {
+      color = _parseSpanHexColor(colorMatch.group(1)!);
+      continue;
+    }
+    final backgroundMatch = _backgroundColorProperty.firstMatch(part);
+    if (backgroundMatch != null) {
+      backgroundColor = _parseSpanRgbaColor(backgroundMatch);
+      continue;
+    }
+    return null;
+  }
+  return _SpanStyle(
+    fontSize: fontSize,
+    color: color,
+    backgroundColor: backgroundColor,
+  );
+}
+
+Color _parseSpanHexColor(String hex) =>
+    Color(0xFF000000 | int.parse(hex, radix: 16));
+
+Color _parseSpanRgbaColor(RegExpMatch match) {
+  // The regex accepts up to three digits; clamp like the application-side
+  // detector does, so a malformed component still renders the visible colour
+  // instead of wrapping to an unrelated one (256 & 0xFF would be 0).
+  int component(String group) => int.parse(group).clamp(0, 255);
+  final r = component(match.group(1)!);
+  final g = component(match.group(2)!);
+  final b = component(match.group(3)!);
+  final a = double.parse(match.group(4)!);
+  return Color.fromARGB((a * 255).round().clamp(0, 255), r, g, b);
+}
 
 bool _isEscaped(String source, int offset) {
   var slashCount = 0;
