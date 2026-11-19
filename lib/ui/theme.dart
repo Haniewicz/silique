@@ -11,6 +11,12 @@ const line = Color(0xff2c3548),
 /// synced or syncing, amber (cloud-off), for every state without synchronization.
 const syncOn = Color(0xff76e6b3), syncOff = Color(0xffffab40);
 
+/// Bundled UI family (assets/fonts, OFL). Widgets rendered outside the normal
+/// `Material` tree — e.g. a bare `OverlayEntry` — do not inherit the theme's
+/// `DefaultTextStyle` and would otherwise render in Flutter's fallback type
+/// (`monospace`, w900, yellow double underline), so they must name this token.
+const kUiFontFamily = 'Inter';
+
 /// Bundled monospace family (assets/fonts, OFL). The generic `'monospace'`
 /// alias is not resolved deterministically by Flutter on every Linux client,
 /// which paints code text as tofu; the bundled family is.
@@ -157,7 +163,7 @@ const siliqueMenuStyle = MenuStyle(
 ThemeData siliqueTheme() => ThemeData(
   brightness: Brightness.dark,
   useMaterial3: true,
-  fontFamily: 'Inter',
+  fontFamily: kUiFontFamily,
   fontFamilyFallback: const ['Apple Color Emoji', 'Noto Color Emoji'],
   scaffoldBackgroundColor: canvas,
   dividerColor: line,
@@ -204,7 +210,7 @@ ThemeData siliqueTheme() => ThemeData(
     menuPadding: const EdgeInsets.all(8),
     shape: menuShape,
     textStyle: const TextStyle(
-      fontFamily: 'Inter',
+      fontFamily: kUiFontFamily,
       fontSize: 13,
       color: textStrong,
     ),

@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:silique/ui/footer_floating_label.dart';
-import 'package:silique/ui/theme.dart' show accent;
+import 'package:silique/ui/theme.dart' show accent, kUiFontFamily, textStrong;
 
 import 'hidden_notes_home_test.dart' show fixture, mount;
 
@@ -130,8 +130,8 @@ void main() {
     expect(first.left, greaterThanOrEqualTo(0));
     expect(first.right, lessThanOrEqualTo(_windowWidth(tester)));
 
-    // A metrics change with the pill visible repositions it (the observer marks
-    // the overlay entry dirty) and never throws on a detached entry. The footer
+    // A metrics change repositions the pill (the observer refreshes the overlay
+    // entry after the layout) and never throws on a detached entry. The footer
     // moved vertically with the resize, so the pointer follows it.
     tester.view.physicalSize = const Size(1050, 760);
     await tester.pumpAndSettle();
@@ -140,6 +140,14 @@ void main() {
     final resized = tester.getRect(_pill);
     expect(resized.left, greaterThanOrEqualTo(0));
     expect(resized.right, lessThanOrEqualTo(_windowWidth(tester)));
+    // The pill sits `_pillHeight + _anchorGap` above the footer row.
+    expect(
+      resized.top,
+      moreOrLessEquals(
+        tester.getRect(find.byKey(const Key('sidebar-footer-actions'))).top -
+            24,
+      ),
+    );
 
     await gesture.moveTo(tester.getCenter(settings));
     await tester.pumpAndSettle();
@@ -148,6 +156,56 @@ void main() {
     expect(last.right, lessThanOrEqualTo(_windowWidth(tester)));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'pill follows a vertically resized window instead of keeping a stale top',
+    (tester) async {
+      final repo = await fixture(tester);
+      await mount(tester, repo, desktop: true);
+      const footerKey = Key('sidebar-footer-actions');
+      final deleted = find.byKey(const Key('deleted-folder-nav'));
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: tester.getCenter(deleted));
+      await gesture.moveTo(tester.getCenter(deleted));
+      await tester.pumpAndSettle();
+
+      // Review case: hovering at 1440x1000 gives a pill just above the footer.
+      final startPill = tester.getRect(_pill);
+      final startFooter = tester.getRect(find.byKey(footerKey));
+      expect(startPill.top, moreOrLessEquals(startFooter.top - 24));
+
+      // Grow the window by 400 px: the footer moves down by 400 px. The entry
+      // must be rebuilt after the new layout instead of keeping the old top.
+      tester.view.physicalSize = const Size(1440, 1400);
+      await tester.pumpAndSettle();
+      await gesture.moveTo(tester.getCenter(deleted));
+      await tester.pumpAndSettle();
+      final grownPill = tester.getRect(_pill);
+      final grownFooter = tester.getRect(find.byKey(footerKey));
+      expect(grownPill.top, moreOrLessEquals(grownFooter.top - 24));
+      expect(grownPill.top, greaterThan(startPill.top + 300));
+      expect(
+        grownPill.top,
+        isNot(startPill.top),
+        reason: 'the pill must not keep the pre-resize position',
+      );
+
+      // Shrink back to the desktop breakpoint: a repeat hover after the resize
+      // still lands above the footer and inside the window.
+      tester.view.physicalSize = const Size(1000, 700);
+      await tester.pumpAndSettle();
+      await gesture.moveTo(tester.getCenter(deleted));
+      await tester.pumpAndSettle();
+      final shrunkPill = tester.getRect(_pill);
+      final shrunkFooter = tester.getRect(find.byKey(footerKey));
+      expect(shrunkPill.top, moreOrLessEquals(shrunkFooter.top - 24));
+      expect(shrunkPill.top, greaterThanOrEqualTo(0));
+      expect(shrunkPill.bottom, lessThanOrEqualTo(700));
+      expect(shrunkPill.left, greaterThanOrEqualTo(0));
+      expect(shrunkPill.right, lessThanOrEqualTo(1000));
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   testWidgets('pill width follows the label instead of a fixed width', (
     tester,
@@ -174,7 +232,7 @@ void main() {
     expect(shortPill.width, greaterThan(paragraph.size.width));
 
     // The style is pinned to the pill look: no inherited decoration.
-    final style = tester.widget<Text>(label).style!;
+    final style = DefaultTextStyle.of(tester.element(label)).style;
     expect(style.fontSize, 11);
     expect(style.decoration, TextDecoration.none);
 
@@ -185,4 +243,42 @@ void main() {
     expect(tester.getRect(_pill).width, greaterThan(shortPill.width));
     expect(tester.takeException(), isNull);
   });
+
+  testWidgets(
+    'pill label uses the UI type, not the MaterialApp text fallback',
+    (tester) async {
+      final repo = await fixture(tester);
+      await mount(tester, repo, desktop: true);
+      final deleted = find.byKey(const Key('deleted-folder-nav'));
+      final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+      await gesture.addPointer(location: tester.getCenter(deleted));
+      await gesture.moveTo(tester.getCenter(deleted));
+      await tester.pumpAndSettle();
+
+      final label = find.text('Usunięte');
+      expect(label, findsOneWidget);
+      // The pill is a bare Overlay entry with no Material above it: without an
+      // explicit style it inherits MaterialApp's glaring fallback (monospace,
+      // w900, yellow double underline) instead of the UI type.
+      final effective = DefaultTextStyle.of(tester.element(label)).style;
+      expect(effective.fontFamily, kUiFontFamily);
+      expect(effective.fontFamily, 'Inter');
+      expect(effective.fontWeight, FontWeight.w400);
+      expect(effective.fontSize, 11);
+      expect(effective.color, textStrong);
+      expect(effective.decoration, TextDecoration.none);
+      // Not the fallback style, in any of its features.
+      expect(effective.fontFamily, isNot('monospace'));
+      expect(effective.fontWeight, isNot(FontWeight.w900));
+      expect(effective.decoration, isNot(TextDecoration.underline));
+      expect(effective.decorationColor, isNot(const Color(0xFFFFFF00)));
+      expect(effective.fontSize, isNot(48));
+
+      // Positioning did not regress: the whole pill is still inside the window.
+      final pill = tester.getRect(_pill);
+      expect(pill.left, greaterThanOrEqualTo(0));
+      expect(pill.right, lessThanOrEqualTo(_windowWidth(tester)));
+      expect(tester.takeException(), isNull);
+    },
+  );
 }

@@ -54,15 +54,6 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
   /// Vertical gap between the pill and the action's top edge.
   static const _anchorGap = 2.0;
 
-  /// The label style is pinned: the pill must look the same as a plain hover
-  /// surface, so the label must never inherit a decoration (the owner reported
-  /// an underline that no source style sets).
-  static const _labelStyle = TextStyle(
-    fontSize: 11,
-    color: textStrong,
-    decoration: TextDecoration.none,
-  );
-
   late final AnimationController _controller = AnimationController(
     vsync: this,
     duration: widget.duration,
@@ -87,12 +78,26 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
     WidgetsBinding.instance.addObserver(this);
   }
 
-  /// The overlay builder only re-runs on its own dependencies; a resize, a text
-  /// scale or a display change moves the anchor without rebuilding it, so the
-  /// visible pill is repositioned explicitly.
+  /// Metrics-change notifications arrive before the new frame is laid out, so
+  /// the anchor still reports its old global position. The rebuild is therefore
+  /// deferred until after the frame: the entry then measures the new layout.
+  /// A plain `markNeedsBuild` here ran in the build phase and kept the pill at
+  /// its stale position (e.g. 400 px away after a vertical resize).
+  void _refreshAfterLayout() {
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted && _inserted) _entry?.markNeedsBuild();
+    });
+  }
+
   @override
-  void didChangeMetrics() {
-    if (_inserted) _entry?.markNeedsBuild();
+  void didChangeMetrics() => _refreshAfterLayout();
+
+  /// A text scale or directionality change moves the pill too, and arrives in
+  /// the build phase as well, so it needs the same post-frame refresh.
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _refreshAfterLayout();
   }
 
   @override
@@ -105,11 +110,26 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
     super.dispose();
   }
 
+  /// The label style is built explicitly from the theme. A bare `OverlayEntry`
+  /// is not under a `Material`/`DefaultTextStyle`, so it would otherwise inherit
+  /// `DefaultTextStyle.fallback()` — monospace, w900, yellow double underline —
+  /// instead of the UI font.
+  TextStyle _labelStyle(BuildContext context) => TextStyle(
+    fontFamily:
+        Theme.of(context).textTheme.bodyMedium?.fontFamily ?? kUiFontFamily,
+    fontSize: 11,
+    fontWeight: FontWeight.w400,
+    color: textStrong,
+    // Pin the pill look; the label must never inherit a decoration.
+    decoration: TextDecoration.none,
+  );
+
   /// Width of the pill: the measured label plus symmetric padding, clamped so
-  /// both a one-letter and an extreme label still produce a sane pill.
-  double _pillWidth(BuildContext context) {
+  /// both a one-letter and an extreme label still produce a sane pill. It
+  /// measures exactly [style], the same object the label is rendered with.
+  double _pillWidth(BuildContext context, TextStyle style) {
     final painter = TextPainter(
-      text: TextSpan(text: widget.label, style: _labelStyle),
+      text: TextSpan(text: widget.label, style: style),
       textDirection: Directionality.of(context),
       textScaler: MediaQuery.textScalerOf(context),
       maxLines: 1,
@@ -128,6 +148,9 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
       Overlay.of(context).insert(_entry!);
       _inserted = true;
     }
+    // A repeat hover must re-measure the anchor: the layout may have moved the
+    // action since the entry was built (resize, collapsed sidebar, text scale).
+    _entry?.markNeedsBuild();
     _controller.forward();
   }
 
@@ -140,7 +163,8 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
       builder: (context) {
         final pos = box.localToGlobal(Offset.zero);
         final windowWidth = MediaQuery.sizeOf(context).width;
-        final width = _pillWidth(context);
+        final labelStyle = _labelStyle(context);
+        final width = _pillWidth(context, labelStyle);
         // Centered on the action, then clamped so the whole pill (both rounded
         // caps) stays inside the window: the edge actions sit within a pill's
         // half-width of an edge, which used to cut the capsule off.
@@ -184,11 +208,13 @@ class _FloatingFooterLabelState extends State<FloatingFooterLabel>
                     color: menuHover,
                     borderRadius: BorderRadius.circular(_pillHeight / 2),
                   ),
-                  child: Text(
-                    widget.label,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: _labelStyle,
+                  child: DefaultTextStyle(
+                    style: labelStyle,
+                    child: Text(
+                      widget.label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
                   ),
                 ),
               ),
