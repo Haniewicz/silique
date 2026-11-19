@@ -1,10 +1,16 @@
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show RenderParagraph;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:silique/ui/footer_floating_label.dart';
 import 'package:silique/ui/theme.dart' show accent;
 
 import 'hidden_notes_home_test.dart' show fixture, mount;
+
+final Finder _pill = find.byKey(const Key('footer-floating-label-pill'));
+
+double _windowWidth(WidgetTester tester) =>
+    tester.view.physicalSize.width / tester.view.devicePixelRatio;
 
 void main() {
   testWidgets(
@@ -99,5 +105,84 @@ void main() {
     expect(find.text('Usunięte'), findsNothing);
     expect(tester.takeException(), isNull);
     semantics.dispose();
+  });
+
+  testWidgets('edge footer pills stay fully inside a narrow desktop surface', (
+    tester,
+  ) async {
+    final repo = await fixture(tester);
+    await mount(tester, repo, desktop: true);
+    // The desktop breakpoint is 1000 px; this is a narrow desktop surface. The
+    // sidebar is 220 px wide, so the first and last footer actions sit within
+    // half a pill of the window edge: a 120 px centered pill used to start at a
+    // negative `left` and lose its left rounded cap off the window.
+    tester.view.physicalSize = const Size(1100, 800);
+    await tester.pumpAndSettle();
+
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    final deleted = find.byKey(const Key('deleted-folder-nav'));
+    final settings = find.byKey(const Key('sidebar-settings-nav'));
+
+    await gesture.addPointer(location: tester.getCenter(deleted));
+    await gesture.moveTo(tester.getCenter(deleted));
+    await tester.pumpAndSettle();
+    final first = tester.getRect(_pill);
+    expect(first.left, greaterThanOrEqualTo(0));
+    expect(first.right, lessThanOrEqualTo(_windowWidth(tester)));
+
+    // A metrics change with the pill visible repositions it (the observer marks
+    // the overlay entry dirty) and never throws on a detached entry. The footer
+    // moved vertically with the resize, so the pointer follows it.
+    tester.view.physicalSize = const Size(1050, 760);
+    await tester.pumpAndSettle();
+    await gesture.moveTo(tester.getCenter(deleted));
+    await tester.pumpAndSettle();
+    final resized = tester.getRect(_pill);
+    expect(resized.left, greaterThanOrEqualTo(0));
+    expect(resized.right, lessThanOrEqualTo(_windowWidth(tester)));
+
+    await gesture.moveTo(tester.getCenter(settings));
+    await tester.pumpAndSettle();
+    final last = tester.getRect(_pill);
+    expect(last.left, greaterThanOrEqualTo(0));
+    expect(last.right, lessThanOrEqualTo(_windowWidth(tester)));
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('pill width follows the label instead of a fixed width', (
+    tester,
+  ) async {
+    final repo = await fixture(tester);
+    await mount(tester, repo, desktop: true);
+    final gesture = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    final deleted = find.byKey(const Key('deleted-folder-nav'));
+    final settings = find.byKey(const Key('sidebar-settings-nav'));
+    await gesture.addPointer(location: tester.getCenter(deleted));
+    await gesture.moveTo(tester.getCenter(deleted));
+    await tester.pumpAndSettle();
+
+    // The old pill was a hard 120 px wide. "Usunięte" at 11 px is much narrower.
+    final shortPill = tester.getRect(_pill);
+    expect(shortPill.width, lessThan(120));
+    expect(shortPill.height, 22);
+
+    // The label is rendered in full: measured width plus padding, no ellipsis.
+    final label = find.text('Usunięte');
+    expect(label, findsOneWidget);
+    final paragraph = tester.renderObject<RenderParagraph>(label);
+    expect(paragraph.didExceedMaxLines, isFalse);
+    expect(shortPill.width, greaterThan(paragraph.size.width));
+
+    // The style is pinned to the pill look: no inherited decoration.
+    final style = tester.widget<Text>(label).style!;
+    expect(style.fontSize, 11);
+    expect(style.decoration, TextDecoration.none);
+
+    // A longer label grows the pill: width is measured, not fixed.
+    await gesture.moveTo(tester.getCenter(settings));
+    await tester.pumpAndSettle();
+    expect(find.text('Ustawienia'), findsOneWidget);
+    expect(tester.getRect(_pill).width, greaterThan(shortPill.width));
+    expect(tester.takeException(), isNull);
   });
 }

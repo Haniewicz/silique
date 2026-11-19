@@ -880,6 +880,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
                     const SizedBox(height: 16),
                     CheckboxListTile(
                       contentPadding: EdgeInsets.zero,
+                      shape: hoverTileShape,
                       value: compared,
                       onChanged: (v) => setState(() => compared = v ?? false),
                       title: Text(
@@ -1257,6 +1258,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
         SwitchListTile(
           key: const Key('hidden-lock-background'),
           contentPadding: EdgeInsets.zero,
+          shape: hoverTileShape,
           value: repo.hiddenLockOnBackground,
           onChanged: busy
               ? null
@@ -1553,6 +1555,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
           for (final v in repo.vaults)
             SwitchListTile(
               contentPadding: EdgeInsets.zero,
+              shape: hoverTileShape,
               value: v.syncEnabled,
               onChanged: busy
                   ? null
@@ -1942,6 +1945,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     return ListTile(
       key: const Key('appearance-default-note-color'),
       contentPadding: EdgeInsets.zero,
+      shape: hoverTileShape,
       leading: _colorSwatch(argb),
       title: Text(tr('Domyślny kolor nowych notatek', 'Default note color')),
       subtitle: Text(_hexText(argb)),
@@ -1955,6 +1959,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     return ListTile(
       key: const Key('appearance-default-folder-color'),
       contentPadding: EdgeInsets.zero,
+      shape: hoverTileShape,
       leading: _colorSwatch(argb),
       title: Text(tr('Domyślny kolor folderów', 'Default folder color')),
       subtitle: Text(
@@ -2315,6 +2320,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     return SwitchListTile(
       key: const Key('templates-folder-hidden-toggle'),
       contentPadding: EdgeInsets.zero,
+      shape: hoverTileShape,
       value: deviceSettings.hideTemplatesFolder,
       onChanged: (value) {
         unawaited(deviceSettings.setHideTemplatesFolder(value));
@@ -2341,6 +2347,7 @@ class _SettingsPanelState extends State<SettingsPanel> {
     return SwitchListTile(
       key: const Key('compact-mode-toggle'),
       contentPadding: EdgeInsets.zero,
+      shape: hoverTileShape,
       value: target != null && repo.compactModeOf(target.id),
       onChanged: busy || target == null
           ? null

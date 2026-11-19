@@ -61,6 +61,15 @@ const hover = Color(0x14ffffff);
 /// The corner radius of the hover surface (folder rows and settings rows).
 const hoverRadius = 6.0;
 
+/// The rounded hover surface of the Settings rows. `SwitchListTile`,
+/// `ListTile` with `onTap` and `CheckboxListTile` draw their InkWell hover with
+/// `shape ?? tileTheme.shape`, so without an explicit `shape` the row paints a
+/// square rectangle next to the folder rows' rounded hover. Shared here so
+/// every settings row matches `_folderRow`/`_sectionTile`.
+const hoverTileShape = RoundedRectangleBorder(
+  borderRadius: BorderRadius.all(Radius.circular(hoverRadius)),
+);
+
 /// Folder glyph tint when the folder carries no explicit accent.
 const folderIcon = Color(0xff8fa6de);
 
