@@ -22,14 +22,17 @@ import android.content.Intent
  *
  * USER_PRESENT / ACTION_SCREEN_ON / ACTION_SCREEN_OFF are runtime-register-only:
  * they cannot be declared in the manifest, so a cold process has no unlock
- * broadcast to react to. To cover "the render landed under a locked keyguard" or
- * "the snapshot could not be read right now", whenever a render happens in such a
- * state a bounded AlarmManager poll re-renders on a short cadence until the
- * device is unlocked / the snapshot is readable again (or the tick budget runs
- * out). The alarm uses RTC (non-wakeup), so it fires when the user actually wakes
- * the device rather than waking it from sleep; each tick is a plain
- * WidgetRuntime.changed() render, so while masked it keeps the masked state and
- * the moment the state settles it paints the last snapshot.
+ * broadcast to react to. Whenever a render happens in a state that needs a later
+ * repaint (locked keyguard or an unreadable snapshot) a bounded AlarmManager
+ * check-back is armed instead. It checks the state without decrypting anything:
+ *
+ *  - the first 30 checks run every 60 s (covers a short lock), then
+ *  - checks continue every 10 minutes for up to 48 hours (covers "locked all
+ *    night, unlocked in the morning"), and only
+ *  - the check that finds the state settled performs the actual render.
+ *
+ * The alarm is RTC (non-wakeup): it fires when the user actually wakes the
+ * device instead of waking it from sleep, so a long check-back costs no wakeups.
  */
 class WidgetRefreshReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
@@ -40,8 +43,7 @@ class WidgetRefreshReceiver : BroadcastReceiver() {
                 syncUnlockPoll(app)
             }
             ACTION_POLL -> {
-                WidgetRuntime.changed(app)
-                tickUnlockPoll(app)
+                if (needsRefresh(app)) tickPending(app) else settle(app)
             }
         }
     }
@@ -62,35 +64,77 @@ class WidgetRefreshReceiver : BroadcastReceiver() {
         if (needsRefresh(context)) armUnlockPoll(context) else cancelUnlockPoll(context)
     }
 
-    private fun tickUnlockPoll(context: Context) {
-        // The render already happened in onReceive; decide from the fresh state.
-        val remaining = pollPrefs(context).getInt(KEY_REMAINING, 0) - 1
-        pollPrefs(context).edit().putInt(KEY_REMAINING, remaining).apply()
-        val pending = needsRefresh(context)
-        WidgetDiagnostics.record(context, "poll", "remaining=$remaining pending=$pending")
-        if (remaining <= 0 || !pending) cancelUnlockPoll(context) else scheduleUnlockPoll(context)
+    /** Still pending: decide when to check again, without touching the key or rendering. */
+    private fun tickPending(context: Context) {
+        val prefs = pollPrefs(context)
+        val stage = prefs.getInt(KEY_STAGE, STAGE_FAST)
+        if (stage == STAGE_FAST) {
+            val remaining = prefs.getInt(KEY_FAST_REMAINING, FAST_TICKS) - 1
+            if (remaining > 0) {
+                prefs.edit().putInt(KEY_FAST_REMAINING, remaining).apply()
+                WidgetDiagnostics.record(context, "poll_wait", "stage=fast remaining=$remaining")
+                scheduleUnlockPoll(context, FAST_INTERVAL_MS)
+            } else {
+                prefs.edit()
+                    .putInt(KEY_STAGE, STAGE_SLOW)
+                    .putInt(KEY_SLOW_REMAINING, SLOW_TICKS)
+                    .apply()
+                WidgetDiagnostics.record(context, "poll_wait", "stage=slow remaining=$SLOW_TICKS")
+                scheduleUnlockPoll(context, SLOW_INTERVAL_MS)
+            }
+        } else {
+            val remaining = prefs.getInt(KEY_SLOW_REMAINING, SLOW_TICKS) - 1
+            if (remaining > 0) {
+                prefs.edit().putInt(KEY_SLOW_REMAINING, remaining).apply()
+                WidgetDiagnostics.record(context, "poll_wait", "stage=slow remaining=$remaining")
+                scheduleUnlockPoll(context, SLOW_INTERVAL_MS)
+            } else {
+                // Locked for two days: give up; the app or a reboot re-arms this.
+                WidgetDiagnostics.record(context, "poll_exhausted")
+                cancelUnlockPoll(context)
+            }
+        }
+    }
+
+    /** The state settled: paint the real content once and stop checking back. */
+    private fun settle(context: Context) {
+        WidgetRuntime.changed(context)
+        cancelUnlockPoll(context)
+        WidgetDiagnostics.record(context, "poll_settled")
     }
 
     private fun armUnlockPoll(context: Context) {
         val prefs = pollPrefs(context)
-        if (prefs.getInt(KEY_REMAINING, 0) <= 0) prefs.edit().putInt(KEY_REMAINING, MAX_UNLOCK_POLL_TICKS).apply()
+        if (!prefs.contains(KEY_STAGE)) {
+            prefs.edit()
+                .putInt(KEY_STAGE, STAGE_FAST)
+                .putInt(KEY_FAST_REMAINING, FAST_TICKS)
+                .apply()
+        }
         WidgetDiagnostics.record(context, "arm")
-        scheduleUnlockPoll(context)
+        scheduleUnlockPoll(
+            context,
+            if (prefs.getInt(KEY_STAGE, STAGE_FAST) == STAGE_FAST) FAST_INTERVAL_MS else SLOW_INTERVAL_MS
+        )
     }
 
-    private fun scheduleUnlockPoll(context: Context) {
+    private fun scheduleUnlockPoll(context: Context, intervalMs: Long) {
         val alarm = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
-        alarm.set(AlarmManager.RTC, System.currentTimeMillis() + UNLOCK_POLL_INTERVAL_MS, pendingIntent(context))
+        alarm.set(AlarmManager.RTC, System.currentTimeMillis() + intervalMs, pendingIntent(context))
     }
 
     private fun cancelUnlockPoll(context: Context) {
         (context.getSystemService(Context.ALARM_SERVICE) as AlarmManager).cancel(pendingIntent(context))
-        pollPrefs(context).edit().remove(KEY_REMAINING).apply()
+        pollPrefs(context).edit()
+            .remove(KEY_STAGE)
+            .remove(KEY_FAST_REMAINING)
+            .remove(KEY_SLOW_REMAINING)
+            .apply()
     }
 
     /**
      * A locked screen and a snapshot that cannot be read right now both settle
-     * without an app launch, so both justify the retry poll.
+     * without an app launch, so both justify the check-back.
      */
     private fun needsRefresh(context: Context): Boolean =
         WidgetRuntime.locked(context) || WidgetRuntime.content(context) is WidgetContent.Unavailable
@@ -107,8 +151,14 @@ class WidgetRefreshReceiver : BroadcastReceiver() {
     companion object {
         const val ACTION_POLL = "pl.silique.app.widgets.UNLOCK_POLL"
         private const val PREFS = "silique.widgets.refresh"
-        private const val KEY_REMAINING = "unlockPollRemaining"
-        private const val UNLOCK_POLL_INTERVAL_MS = 60_000L
-        private const val MAX_UNLOCK_POLL_TICKS = 30
+        private const val KEY_STAGE = "pollStage"
+        private const val KEY_FAST_REMAINING = "pollFastRemaining"
+        private const val KEY_SLOW_REMAINING = "pollSlowRemaining"
+        private const val STAGE_FAST = 0
+        private const val STAGE_SLOW = 1
+        private const val FAST_INTERVAL_MS = 60_000L
+        private const val FAST_TICKS = 30
+        private const val SLOW_INTERVAL_MS = 600_000L
+        private const val SLOW_TICKS = 288
     }
 }

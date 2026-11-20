@@ -20,11 +20,14 @@ looks like an empty vault:
   usable yet, transient I/O): the list is hidden and the launcher shows
   "notes are temporarily unavailable" instead of "no notes". The file is kept.
 
-A render that lands locked or unreadable arms a bounded retry poll (60 s, at most
-30 ticks) that repaints until the state settles, so a cold-start render does not
-stay wrong until the app is next opened. The app also republishes the snapshot
-when it returns to the foreground, and a rejected publish no longer drops the last
-good encrypted copy.
+A render that lands locked or unreadable arms a bounded check-back: every 60 s for
+the first 30 checks, then every 10 minutes for up to 48 hours, and only the check
+that finds the state settled performs the render (the others decrypt nothing and
+repaint nothing). The alarm is RTC/non-wakeup, so it fires when the user wakes the
+device rather than waking it from sleep. This is what keeps a phone locked
+overnight from showing the masked state until the app is next opened. The app also
+republishes the snapshot when it returns to the foreground, and a rejected publish
+no longer drops the last good encrypted copy.
 
 ## Diagnostics
 
