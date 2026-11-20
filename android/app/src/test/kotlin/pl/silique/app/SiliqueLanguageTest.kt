@@ -1,6 +1,7 @@
 package pl.silique.app
 
 import android.content.Context
+import android.os.PowerManager
 import android.widget.EditText
 import android.widget.FrameLayout
 import android.widget.TextView
@@ -27,7 +28,7 @@ class SiliqueLanguageTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
 
     @Before fun seed() {
-        WidgetRuntime.screenOff = false
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         WidgetRuntime.storeFactory = { SnapshotStore(it) { key } }
         WidgetRuntime.store(context).write(WidgetSnapshot(listOf(

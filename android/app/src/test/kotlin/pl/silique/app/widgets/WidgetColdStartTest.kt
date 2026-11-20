@@ -2,6 +2,7 @@ package pl.silique.app.widgets
 
 import android.content.Context
 import android.content.Intent
+import android.os.PowerManager
 import android.content.pm.PackageManager
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
@@ -9,6 +10,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.shadows.ShadowLooper
 import javax.crypto.KeyGenerator
@@ -25,7 +27,7 @@ class WidgetColdStartTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
 
     @Before fun seed() {
-        WidgetRuntime.screenOff = false
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         WidgetRuntime.storeFactory = { SnapshotStore(it) { key } }
     }

@@ -4,6 +4,7 @@ import android.app.Activity
 import android.app.KeyguardManager
 import android.appwidget.AppWidgetManager
 import android.content.ComponentName
+import android.os.PowerManager
 import android.content.Context
 import android.content.pm.PackageManager
 import android.view.WindowManager
@@ -27,7 +28,7 @@ import javax.crypto.KeyGenerator
 class WidgetComponentsTest {
     private val context get() = ApplicationProvider.getApplicationContext<Context>()
     @Before fun seed() {
-        WidgetRuntime.screenOff = false
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
         val key = KeyGenerator.getInstance("AES").apply { init(256) }.generateKey()
         WidgetRuntime.storeFactory = { SnapshotStore(it) { key } }
         WidgetRuntime.store(context).write(WidgetSnapshot.fromMap(mapOf(
@@ -272,6 +273,7 @@ class WidgetComponentsTest {
         val controller = Robolectric.buildActivity(WidgetSearchActivity::class.java).setup()
         val activity = controller.get()
         assertEquals(1, activity.findViewById<ListView>(R.id.widget_results).adapter.count)
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(false)
         context.sendBroadcast(android.content.Intent(android.content.Intent.ACTION_SCREEN_OFF))
         org.robolectric.shadows.ShadowLooper.shadowMainLooper().idle()
         assertEquals(0, activity.findViewById<ListView>(R.id.widget_results).adapter.count)

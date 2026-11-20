@@ -1,6 +1,7 @@
 package pl.silique.app.widgets
 
 import android.content.Context
+import android.os.PowerManager
 import androidx.test.core.app.ApplicationProvider
 import io.flutter.plugin.common.BinaryMessenger
 import io.flutter.plugin.common.MethodChannel
@@ -9,6 +10,7 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import pl.silique.app.SiliqueWidgets
 import java.nio.ByteBuffer
@@ -50,7 +52,7 @@ class WidgetPublishTest {
         CaptureResult().also { handle(method, arguments, it) }
 
     @Before fun seed() {
-        WidgetRuntime.screenOff = false
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
         WidgetRuntime.storeFactory = { SnapshotStore(it) { key } }
         WidgetRuntime.store(context).clear()
     }

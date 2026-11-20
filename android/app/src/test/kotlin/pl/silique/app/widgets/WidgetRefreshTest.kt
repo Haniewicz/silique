@@ -3,6 +3,7 @@ package pl.silique.app.widgets
 import android.app.AlarmManager
 import android.app.KeyguardManager
 import android.content.Context
+import android.os.PowerManager
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
 import org.junit.Before
@@ -36,7 +37,7 @@ class WidgetRefreshTest {
     private val pollPrefs get() = context.getSharedPreferences("silique.widgets.refresh", Context.MODE_PRIVATE)
 
     @Before fun seed() {
-        WidgetRuntime.screenOff = false
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
         WidgetRuntime.storeFactory = { SnapshotStore(it) { key } }
         WidgetRuntime.store(context).clear()
         WidgetRefreshReceiver().cancelAll(context)
@@ -96,6 +97,27 @@ class WidgetRefreshTest {
             assertEquals(1, redraws)
             assertFalse(pollPrefs.contains("pollStage"))
             assertTrue(WidgetRuntime.content(context) is WidgetContent.Ready)
+        } finally {
+            WidgetRuntime.unlisten(listener)
+        }
+    }
+
+    @Test fun aMissedUnlockBroadcastSettlesOnTheNextCheck() {
+        WidgetRuntime.store(context).write(snapshot)
+        val power = shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager)
+        power.setIsInteractive(false)
+        var redraws = 0
+        val listener: () -> Unit = { redraws++ }
+        WidgetRuntime.listen(listener)
+        try {
+            WidgetRefreshReceiver().onRendered(context)
+            assertEquals("Arming must not repaint", 0, redraws)
+            // The user unlocks; no USER_PRESENT reaches this frozen process.
+            power.setIsInteractive(true)
+            alarm().peekNextScheduledAlarm()!!.operation!!.send()
+            ShadowLooper.shadowMainLooper().idle()
+            assertEquals("The first check after the unlock must repaint the notes", 1, redraws)
+            assertFalse(pollPrefs.contains("pollStage"))
         } finally {
             WidgetRuntime.unlisten(listener)
         }

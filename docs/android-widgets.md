@@ -47,9 +47,11 @@ a transient key or I/O problem keeps it.
   native revocation aborts the move rather than leaving an old launcher index.
 - Snapshot bytes are AES-256-GCM encrypted using an AndroidKeystore key and an
   atomic file in `noBackupFilesDir`; they are not stored in SharedPreferences.
-- Screen-off immediately masks launcher content and clears open native query /
-  results, even before keyguard reports locked. Keyguard checks also guard every
-  snapshot read and result selection. Unlock refreshes from the current snapshot.
+- Masking reads the live screen/keyguard state (PowerManager + KeyguardManager)
+  on every render and result selection; it is never remembered from a broadcast,
+  so a process that missed ACTION_USER_PRESENT while frozen cannot stay masked.
+  Screen-off still masks immediately and clears open native query / results, and
+  unlock refreshes from the current snapshot.
 - Native search uses FLAG_SECURE, disables keyboard learning/autofill and does not
   save its query/results in Android instance state. This cannot stop a launcher
   from retaining data it already rendered while the phone was unlocked.

@@ -5,6 +5,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.app.KeyguardManager
+import android.os.PowerManager
 import android.view.View
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.*
@@ -35,7 +36,7 @@ class WidgetContentTest {
     ))
 
     @Before fun seed() {
-        WidgetRuntime.screenOff = false
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
         WidgetRuntime.storeFactory = { SnapshotStore(it) { key } }
         WidgetRuntime.store(context).clear()
         shadowOf(context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).setKeyguardLocked(false)
@@ -96,11 +97,28 @@ class WidgetContentTest {
         factory.onDestroy()
     }
 
+    @Test fun aMaskedWidgetHealsOnceTheScreenIsInteractiveAgain() {
+        WidgetRuntime.store(context).write(snapshot)
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(false)
+        assertTrue(WidgetRuntime.content(context) is WidgetContent.Locked)
+        // No unlock broadcast reaches us (the process may have missed it): the
+        // next render must read the live screen state instead of a remembered flag.
+        shadowOf(context.getSystemService(Context.POWER_SERVICE) as PowerManager).setIsInteractive(true)
+        assertFalse(WidgetRuntime.locked(context))
+        assertTrue(WidgetRuntime.content(context) is WidgetContent.Ready)
+        val view = rendered(WidgetRenderer.list(context, 1))
+        assertEquals(
+            context.getString(R.string.widget_notes_header),
+            view.findViewById<android.widget.TextView>(R.id.widget_recent).text.toString()
+        )
+    }
+
     @Test fun everyListRenderIsRecordedInDiagnostics() {
         WidgetRuntime.store(context).write(snapshot)
         WidgetRenderer.list(context, 7)
         val log = WidgetDiagnostics.read(context)
         assertTrue(log.contains("render widget=7 type=list state=notes=1"))
+        assertTrue("Diagnostics must say which live signal masked the render", log.contains("lock="))
         assertFalse("Diagnostics must never contain note text", log.contains("Garden"))
         assertFalse("Diagnostics must never contain note text", log.contains("orchid"))
     }

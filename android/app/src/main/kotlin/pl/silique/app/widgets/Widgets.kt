@@ -7,6 +7,7 @@ import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.PowerManager
 import android.view.View
 import android.widget.RemoteViews
 import android.widget.RemoteViewsService
@@ -24,11 +25,27 @@ object WidgetRuntime {
     val actions = WidgetActionQueue()
     private val listeners = mutableSetOf<() -> Unit>()
     private val languageListeners = mutableSetOf<() -> Unit>()
-    var screenOff = false
     var revocationVersion = 0L
         private set
     fun store(context: Context) = storeFactory(context.applicationContext)
-    fun locked(context: Context) = screenOff || (context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked
+
+    /**
+     * Masked when the keyguard is showing or the screen is not interactive.
+     *
+     * The screen state is read from the system every time instead of being
+     * remembered from ACTION_SCREEN_OFF: a remembered flag goes stale when the
+     * process is frozen in the background and misses ACTION_USER_PRESENT, which
+     * used to keep the launcher masked for the rest of that process's lifetime.
+     */
+    fun locked(context: Context): Boolean =
+        reason(context) != null
+
+    /** Which live signal masks the launcher right now, for diagnostics. */
+    fun reason(context: Context): String? {
+        if ((context.getSystemService(Context.KEYGUARD_SERVICE) as KeyguardManager).isKeyguardLocked) return "keyguard"
+        val power = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+        return if (power.isInteractive) null else "screen_off"
+    }
     /**
      * One read per render. A genuinely empty index ([SnapshotRead.Missing]) stays
      * distinct from an index that cannot be read right now ([SnapshotRead.Unavailable]),
@@ -115,7 +132,8 @@ object WidgetRenderer {
     fun list(base: Context, id: Int): RemoteViews {
         val context = pl.silique.app.SiliqueLanguage.context(base)
         val content = WidgetRuntime.content(base)
-        WidgetDiagnostics.record(base, "render", "widget=${id} type=list state=${stateName(content)}")
+        WidgetDiagnostics.record(base, "render",
+            "widget=${id} type=list state=${stateName(content)} lock=${WidgetRuntime.reason(base) ?: "none"}")
         return RemoteViews(context.packageName, R.layout.widget_notes).apply {
             // RemoteViews is inflated by the launcher's (possibly different) locale.
             // Override every localized XML value before handing it to that host.
