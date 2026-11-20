@@ -5,11 +5,14 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.content.IntentFilter
+import android.graphics.Color
+import android.graphics.drawable.ColorDrawable
 import android.os.Build
 import android.os.Bundle
 import android.text.Editable
 import android.text.TextWatcher
 import android.view.View
+import android.view.ViewGroup
 import android.view.WindowManager
 import android.widget.ArrayAdapter
 import android.widget.EditText
@@ -21,7 +24,7 @@ import pl.silique.app.widgets.WidgetNote
 import pl.silique.app.widgets.WidgetRuntime
 import pl.silique.app.widgets.WidgetSnapshot
 
-/** Native-only modal: creating it never initializes a Flutter engine. */
+/** Native-only floating dialog: creating it never initializes a Flutter engine. */
 class WidgetSearchActivity : Activity() {
     override fun attachBaseContext(newBase: Context) {
         super.attachBaseContext(SiliqueLanguage.context(newBase))
@@ -43,17 +46,32 @@ class WidgetSearchActivity : Activity() {
     private val screenReceiver = object : BroadcastReceiver() {
         override fun onReceive(context: Context, intent: Intent) { refresh() }
     }
+
     override fun onCreate(state: Bundle?) {
         super.onCreate(state)
         window.addFlags(WindowManager.LayoutParams.FLAG_SECURE)
         setContentView(R.layout.widget_search)
-        window.setLayout(WindowManager.LayoutParams.MATCH_PARENT, WindowManager.LayoutParams.MATCH_PARENT)
-        findViewById<android.view.View>(R.id.widget_search_backdrop).setOnClickListener { finish() }
+        // The window is transparent and only the outside is dimmed: the launcher
+        // that opened the widget stays visible behind a small floating card.
+        window.setBackgroundDrawable(ColorDrawable(Color.TRANSPARENT))
+        val metrics = resources.displayMetrics
+        window.setLayout(
+            minOf((metrics.widthPixels * 0.92f).toInt(), dp(560)),
+            ViewGroup.LayoutParams.WRAP_CONTENT
+        )
+        setFinishOnTouchOutside(true)
         query = findViewById(R.id.widget_query)
         results = findViewById(R.id.widget_results)
         status = findViewById(R.id.widget_search_status)
+        // Keep the card usable when the keyboard shrinks the visible area.
+        results.layoutParams = results.layoutParams.also {
+            it.height = minOf(dp(360), metrics.heightPixels / 2)
+        }
         query.requestFocus()
-        window.setSoftInputMode(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
+        window.setSoftInputMode(
+            WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE or
+                WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN
+        )
         WidgetRuntime.listen(changed)
         WidgetRuntime.listenLanguage(languageChanged)
         val filter = IntentFilter().apply { addAction(Intent.ACTION_SCREEN_OFF); addAction(Intent.ACTION_USER_PRESENT); addAction(Intent.ACTION_SCREEN_ON) }
@@ -74,6 +92,9 @@ class WidgetSearchActivity : Activity() {
         }
         refresh()
     }
+
+    private fun dp(value: Int) = (value * resources.displayMetrics.density).toInt()
+
     private fun refresh() {
         if (!::query.isInitialized) return
         if (WidgetRuntime.locked(this) && query.text.isNotEmpty()) query.setText("")

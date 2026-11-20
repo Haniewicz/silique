@@ -173,55 +173,55 @@ class WidgetComponentsTest {
         assertNotEquals(launches[0].data, launches[1].data)
     }
 
-    @Test fun searchNeverShowsTheExistingEditorBehindItsBackdrop() {
+    @Test fun searchOpensAsASmallFloatingCardOverTheScreenBehind() {
         val controller = Robolectric.buildActivity(WidgetSearchActivity::class.java).setup()
         val activity = controller.get()
         val theme = activity.obtainStyledAttributes(intArrayOf(
-            android.R.attr.windowIsTranslucent,
             android.R.attr.windowIsFloating,
-            android.R.attr.backgroundDimEnabled,
-            android.R.attr.windowBackground
+            android.R.attr.backgroundDimEnabled
         ))
         try {
-            assertFalse("Search must cover any previously open note", theme.getBoolean(0, true))
-            assertFalse(theme.getBoolean(1, true))
-            assertFalse(theme.getBoolean(2, true))
-            val background = theme.getDrawable(3) as android.graphics.drawable.ColorDrawable
-            assertEquals(0xFF131925.toInt(), background.color)
+            assertTrue("Search must be a floating window over the launcher", theme.getBoolean(0, false))
+            assertTrue("The area around the card must be dimmed", theme.getBoolean(1, false))
         } finally { theme.recycle() }
-        assertEquals(WindowManager.LayoutParams.MATCH_PARENT, activity.window.attributes.width)
-        assertEquals(WindowManager.LayoutParams.MATCH_PARENT, activity.window.attributes.height)
-        val backdropId = activity.resources.getIdentifier("widget_search_backdrop", "id", activity.packageName)
-        val cardId = activity.resources.getIdentifier("widget_search_card", "id", activity.packageName)
-        assertNotEquals(0, backdropId)
-        assertNotEquals(0, cardId)
-        val backdrop = activity.findViewById<android.widget.FrameLayout>(backdropId)
-        val card = activity.findViewById<android.view.View>(cardId)
-        assertEquals(android.view.Gravity.CENTER, (card.layoutParams as android.widget.FrameLayout.LayoutParams).gravity)
-        assertEquals(0xFF131925.toInt(), (card.background as android.graphics.drawable.ColorDrawable).color)
-        backdrop.performClick()
-        assertTrue(activity.isFinishing)
+        // The card itself stays opaque: nothing behind it can be read through it.
+        val card = activity.findViewById<android.view.View>(R.id.widget_search_card)
+        val cardBackground = card.background as android.graphics.drawable.GradientDrawable
+        assertEquals(0xFF131925.toInt(), cardBackground.color!!.defaultColor)
+        // The window is smaller than the screen instead of covering the status bar.
+        val width = activity.window.attributes.width
+        assertTrue("Floating window must be narrower than the screen", width in 1 until activity.resources.displayMetrics.widthPixels)
+        assertEquals(android.view.ViewGroup.LayoutParams.WRAP_CONTENT, activity.window.attributes.height)
         controller.pause().stop().destroy()
     }
 
-    @Test fun searchQueryRemainsVisibleInShortImeWindow() {
+    @Test fun notesListSpacesRowsWithoutPerRowMargins() {
+        val parent = android.widget.FrameLayout(context)
+        val view = WidgetRenderer.list(context, 42).apply(context, parent)
+        val list = view.findViewById<ListView>(R.id.widget_notes)
+        assertTrue("The first card must start clear of the list clip edge", list.paddingTop > 0)
+        assertFalse(list.clipToPadding)
+        assertTrue("Rows are spaced by the list divider", list.dividerHeight > 0)
+        val row = android.view.LayoutInflater.from(context)
+            .inflate(R.layout.widget_row, android.widget.FrameLayout(context), false)
+        val params = row.layoutParams as android.view.ViewGroup.MarginLayoutParams
+        assertEquals("A per-row margin made the first card clip", 0, params.bottomMargin)
+    }
+
+    @Test fun searchQueryRemainsVisibleWhenTheKeyboardShrinksTheCard() {
         val controller = Robolectric.buildActivity(WidgetSearchActivity::class.java).setup()
-        val backdrop = controller.get().findViewById<android.widget.FrameLayout>(R.id.widget_search_backdrop)
-        val query = controller.get().findViewById<EditText>(R.id.widget_query)
-        val width = android.view.View.MeasureSpec.makeMeasureSpec(320, android.view.View.MeasureSpec.EXACTLY)
-        val height = android.view.View.MeasureSpec.makeMeasureSpec(200, android.view.View.MeasureSpec.EXACTLY)
-        backdrop.measure(width, height)
-        backdrop.layout(0, 0, 320, 200)
-        val card = controller.get().findViewById<android.view.View>(R.id.widget_search_card)
-        assertEquals("Card must shrink with IME window", android.view.ViewGroup.LayoutParams.MATCH_PARENT, card.layoutParams.height)
-        val results = controller.get().findViewById<ListView>(R.id.widget_results)
-        val resultsParams = results.layoutParams as android.widget.LinearLayout.LayoutParams
-        assertEquals("Results must yield space to the query", 0, resultsParams.height)
-        assertEquals(1f, resultsParams.weight)
-        assertTrue("Search card must fit the resized viewport", card.height <= 200)
-        val top = query.top + (query.parent as android.view.View).top
-        assertTrue("Search must not be clipped above the resized window", top >= 0)
-        assertTrue("Query must remain entirely visible with the keyboard", top + query.height <= 200)
+        val activity = controller.get()
+        val card = activity.findViewById<android.view.View>(R.id.widget_search_card)
+        val query = activity.findViewById<EditText>(R.id.widget_query)
+        // The keyboard can leave less vertical room than the results list wants;
+        // the query (and the card top) must stay visible inside that room.
+        card.measure(
+            android.view.View.MeasureSpec.makeMeasureSpec(320, android.view.View.MeasureSpec.EXACTLY),
+            android.view.View.MeasureSpec.makeMeasureSpec(240, android.view.View.MeasureSpec.AT_MOST)
+        )
+        card.layout(0, 0, card.measuredWidth, card.measuredHeight)
+        assertTrue("The query must stay inside the card", query.top >= 0)
+        assertTrue("The query must remain visible above the results", query.top + query.height <= card.measuredHeight)
         controller.pause().stop().destroy()
     }
 
@@ -233,7 +233,7 @@ class WidgetComponentsTest {
         val softInputMode = activity.window.attributes.softInputMode
         assertEquals(WindowManager.LayoutParams.SOFT_INPUT_STATE_ALWAYS_VISIBLE,
             softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_STATE)
-        assertEquals(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE,
+        assertEquals(WindowManager.LayoutParams.SOFT_INPUT_ADJUST_PAN,
             softInputMode and WindowManager.LayoutParams.SOFT_INPUT_MASK_ADJUST)
         controller.pause().stop().destroy()
     }

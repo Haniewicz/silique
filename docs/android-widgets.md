@@ -1,9 +1,11 @@
 # Android launcher widgets
 
 The launcher picker offers **Notatki**, **Nowa notatka**, **Wpis do dziennika**
-and **Szukaj**. Search is a small native Android dialog, not a Flutter route;
-typing/filtering/cancelling it never starts MainActivity. Selecting a result opens
-the exact ordinary note. New-note and journal actions open the ordinary editor,
+and **Szukaj**. Search is a small native Android floating dialog over the launcher
+that opened the widget — a transparent window (only the outside is dimmed) with a
+fully opaque card, so the screen behind stays visible while no note text can be
+read through it. Typing/filtering/cancelling it never starts MainActivity; a tap
+outside closes it. Selecting a result opens the exact ordinary note. New-note and journal actions open the ordinary editor,
 leaving and locking the hidden section first. Journal uses the repository's normal
 local-date/title behavior.
 
@@ -13,7 +15,10 @@ Every render resolves to exactly one of three states, so a temporary problem nev
 looks like an empty vault:
 
 - **ready** — the decrypted index is present (possibly with zero notes, which is a
-  genuine "no notes" and shows that hint);
+  genuine "no notes" and shows that hint). Rows are separated by a transparent
+  list divider plus list padding instead of per-row margins, because a margin on
+  a RemoteViews collection row made the first card sit on the clip edge and look
+  cut off;
 - **locked** — the keyguard is up or the screen is off: the list is hidden and the
   header says the notes are locked; no empty-list hint is drawn;
 - **unreadable** — the encrypted snapshot cannot be read right now (Keystore not

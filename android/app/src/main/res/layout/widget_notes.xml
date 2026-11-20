@@ -32,14 +32,24 @@
             android:textSize="20sp"/>
     </LinearLayout>
 
+    <!--
+      Row spacing lives in the list itself (transparent divider + padding) instead
+      of per-row layout margins: a RemoteViews collection row is wrapped by the
+      launcher, and a margin on the row root made the first card sit on the clip
+      edge, so its top border looked cut off. The extra top padding also keeps the
+      first card clear of the header.
+    -->
     <ListView
         android:id="@+id/widget_notes"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
-        android:layout_marginTop="6dp"
-        android:divider="@null"
-        android:dividerHeight="0dp"
+        android:layout_marginTop="4dp"
+        android:paddingTop="6dp"
+        android:paddingBottom="6dp"
+        android:clipToPadding="false"
+        android:divider="@android:color/transparent"
+        android:dividerHeight="6dp"
         android:scrollbars="none"/>
 
     <TextView

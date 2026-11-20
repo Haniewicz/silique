@@ -1,13 +1,19 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <style name="WidgetSearchTheme" parent="android:style/Theme.Material.NoActionBar">
-        <!-- Cover the previous Silique task; it may have an unlocked editor. -->
-        <item name="android:windowIsTranslucent">false</item>
-        <item name="android:windowIsFloating">false</item>
-        <item name="android:backgroundDimEnabled">false</item>
-        <item name="android:windowBackground">@color/silique_canvas</item>
+    <!--
+      A small floating dialog over the launcher that opened it. The window itself is
+      transparent (only the outside is dimmed) while the card inside is fully opaque,
+      so no note text from behind can be read through it.
+    -->
+    <style name="WidgetSearchTheme" parent="android:style/Theme.Material.Dialog">
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:backgroundDimEnabled">true</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowCloseOnTouchOutside">true</item>
         <item name="android:colorAccent">@color/silique_accent</item>
-        <item name="android:statusBarColor">@color/silique_canvas</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
     </style>
     <style name="WidgetActionTheme" parent="android:style/Theme.NoDisplay"/>
 </resources>

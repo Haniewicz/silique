@@ -40,7 +40,7 @@
                 <category android:name="android.intent.category.LAUNCHER"/>
             </intent-filter>
         </activity>
-        <activity android:name="pl.silique.app.WidgetSearchActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/WidgetSearchTheme" android:windowSoftInputMode="adjustResize" />
+        <activity android:name="pl.silique.app.WidgetSearchActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/WidgetSearchTheme" android:windowSoftInputMode="adjustPan" />
         <activity android:name="pl.silique.app.WidgetActionActivity" android:exported="false" android:excludeFromRecents="true" android:theme="@style/WidgetActionTheme" android:noHistory="true" />
         <service android:name="pl.silique.app.widgets.NotesRemoteViewsService" android:exported="false" android:permission="android.permission.BIND_REMOTEVIEWS" />
         <service
