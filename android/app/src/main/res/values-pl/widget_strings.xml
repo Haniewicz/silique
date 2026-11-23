@@ -12,6 +12,9 @@
     <string name="widget_new_note">+ Nowa notatka</string>
     <string name="widget_search_action">⌕ Szukaj notatek</string>
     <string name="widget_journal_action">✎ Wpis do dziennika</string>
+    <string name="widget_new_note_compact">+</string>
+    <string name="widget_search_compact">⌕</string>
+    <string name="widget_journal_compact">✎</string>
     <string name="widget_search_hint">Szukaj notatek</string>
     <string name="widget_untitled">Bez tytułu</string>
 </resources>

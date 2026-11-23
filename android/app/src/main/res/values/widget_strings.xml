@@ -12,6 +12,9 @@
     <string name="widget_new_note">+ New note</string>
     <string name="widget_search_action">⌕ Search notes</string>
     <string name="widget_journal_action">✎ Journal entry</string>
+    <string name="widget_new_note_compact">+</string>
+    <string name="widget_search_compact">⌕</string>
+    <string name="widget_journal_compact">✎</string>
     <string name="widget_search_hint">Search notes</string>
     <string name="widget_untitled">Untitled</string>
 </resources>

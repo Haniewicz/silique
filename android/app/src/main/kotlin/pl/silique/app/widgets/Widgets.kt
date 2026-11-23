@@ -1,12 +1,14 @@
 package pl.silique.app.widgets
 
 import android.app.KeyguardManager
+import android.app.PendingIntent
 import android.appwidget.AppWidgetManager
 import android.appwidget.AppWidgetProvider
 import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.os.PowerManager
 import android.view.View
 import android.widget.RemoteViews
@@ -83,7 +85,7 @@ object WidgetRuntime {
             manager.getAppWidgetIds(ComponentName(context, type)).forEach { id ->
                 // Merge labels only: keep content, masking, adapters and existing vault targets.
                 // Never notify collection data/listeners here: both may decrypt snapshots.
-                manager.partiallyUpdateAppWidget(id, WidgetRenderer.labels(context, type))
+                manager.partiallyUpdateAppWidget(id, WidgetRenderer.labels(context, type, id))
             }
         }
     }
@@ -109,7 +111,25 @@ object WidgetRuntime {
 }
 
 object WidgetRenderer {
-    fun labels(base: Context, type: Class<*>): RemoteViews {
+    /** One launcher slot is roughly 40–80 dp; two slots are 110+ dp. */
+    private const val COMPACT_BELOW_DP = 100
+
+    /** Compact only for a positive width below two slots; 0/absent means full (back-compat). */
+    private fun isCompact(base: Context, id: Int, minWidthDp: Int?): Boolean {
+        val width = minWidthDp ?: AppWidgetManager.getInstance(base)
+            .getAppWidgetOptions(id)
+            .getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)
+        return width > 0 && width < COMPACT_BELOW_DP
+    }
+
+    private fun actionView(context: Context, compact: Boolean, label: Int, description: Int, pending: PendingIntent): RemoteViews =
+        RemoteViews(context.packageName, if (compact) R.layout.widget_action_compact else R.layout.widget_action).apply {
+            setTextViewText(R.id.widget_action, context.getString(label))
+            setContentDescription(R.id.widget_action, context.getString(description))
+            setOnClickPendingIntent(R.id.widget_action, pending)
+        }
+
+    fun labels(base: Context, type: Class<*>, id: Int): RemoteViews {
         val context = pl.silique.app.SiliqueLanguage.context(base)
         if (type == NoteListWidget::class.java) {
             return RemoteViews(context.packageName, R.layout.widget_notes).apply {
@@ -118,13 +138,14 @@ object WidgetRenderer {
                 setContentDescription(R.id.widget_surface, context.getString(R.string.widget_notes_description))
             }
         }
+        val compact = isCompact(base, id, null)
         val (label, description) = when (type) {
-            NewNoteWidget::class.java -> R.string.widget_new_note to R.string.widget_new_note_description
-            JournalWidget::class.java -> R.string.widget_journal_action to R.string.widget_journal_description
-            SearchWidget::class.java -> R.string.widget_search_action to R.string.widget_search_description
+            NewNoteWidget::class.java -> (if (compact) R.string.widget_new_note_compact else R.string.widget_new_note) to R.string.widget_new_note_description
+            JournalWidget::class.java -> (if (compact) R.string.widget_journal_compact else R.string.widget_journal_action) to R.string.widget_journal_description
+            SearchWidget::class.java -> (if (compact) R.string.widget_search_compact else R.string.widget_search_action) to R.string.widget_search_description
             else -> error("Unknown widget provider")
         }
-        return RemoteViews(context.packageName, R.layout.widget_action).apply {
+        return RemoteViews(context.packageName, if (compact) R.layout.widget_action_compact else R.layout.widget_action).apply {
             setTextViewText(R.id.widget_action, context.getString(label))
             setContentDescription(R.id.widget_action, context.getString(description))
         }
@@ -170,31 +191,46 @@ object WidgetRenderer {
         WidgetContent.Locked -> "locked"
         WidgetContent.Unavailable -> "unavailable"
     }
-    fun newNote(base: Context, id: Int): RemoteViews {
+    fun newNote(base: Context, id: Int): RemoteViews = newNote(base, id, null)
+
+    fun newNote(base: Context, id: Int, minWidthDp: Int?): RemoteViews {
+        val context = pl.silique.app.SiliqueLanguage.context(base)
+        // Decrypt once; the compact variant reuses the same vault target and intent.
+        val lastVaultId = (WidgetRuntime.content(base) as? WidgetContent.Ready)?.lastVaultId
+        val compact = isCompact(base, id, minWidthDp)
+        return actionView(
+            context, compact,
+            if (compact) R.string.widget_new_note_compact else R.string.widget_new_note,
+            R.string.widget_new_note_description,
+            WidgetIntents.newPending(context, lastVaultId, id)
+        )
+    }
+
+    fun search(base: Context, id: Int): RemoteViews = search(base, id, null)
+
+    fun search(base: Context, id: Int, minWidthDp: Int?): RemoteViews {
+        val context = pl.silique.app.SiliqueLanguage.context(base)
+        val compact = isCompact(base, id, minWidthDp)
+        return actionView(
+            context, compact,
+            if (compact) R.string.widget_search_compact else R.string.widget_search_action,
+            R.string.widget_search_description,
+            WidgetIntents.searchPending(context, id)
+        )
+    }
+
+    fun journal(base: Context, id: Int): RemoteViews = journal(base, id, null)
+
+    fun journal(base: Context, id: Int, minWidthDp: Int?): RemoteViews {
         val context = pl.silique.app.SiliqueLanguage.context(base)
         val lastVaultId = (WidgetRuntime.content(base) as? WidgetContent.Ready)?.lastVaultId
-        return RemoteViews(context.packageName, R.layout.widget_action).apply {
-            setTextViewText(R.id.widget_action, context.getString(R.string.widget_new_note))
-            setContentDescription(R.id.widget_action, context.getString(R.string.widget_new_note_description))
-            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.newPending(context, lastVaultId, id))
-        }
-    }
-    fun search(base: Context, id: Int): RemoteViews {
-        val context = pl.silique.app.SiliqueLanguage.context(base)
-        return RemoteViews(context.packageName, R.layout.widget_action).apply {
-            setTextViewText(R.id.widget_action, context.getString(R.string.widget_search_action))
-            setContentDescription(R.id.widget_action, context.getString(R.string.widget_search_description))
-            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.searchPending(context, id))
-        }
-    }
-    fun journal(base: Context, id: Int): RemoteViews {
-        val context = pl.silique.app.SiliqueLanguage.context(base)
-        val lastVaultId = (WidgetRuntime.content(base) as? WidgetContent.Ready)?.lastVaultId
-        return RemoteViews(context.packageName, R.layout.widget_action).apply {
-            setTextViewText(R.id.widget_action, context.getString(R.string.widget_journal_action))
-            setContentDescription(R.id.widget_action, context.getString(R.string.widget_journal_description))
-            setOnClickPendingIntent(R.id.widget_action, WidgetIntents.journalPending(context, lastVaultId, id))
-        }
+        val compact = isCompact(base, id, minWidthDp)
+        return actionView(
+            context, compact,
+            if (compact) R.string.widget_journal_compact else R.string.widget_journal_action,
+            R.string.widget_journal_description,
+            WidgetIntents.journalPending(context, lastVaultId, id)
+        )
     }
 }
 
@@ -203,12 +239,24 @@ class NoteListWidget : AppWidgetProvider() {
 }
 class NewNoteWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.newNote(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, newOptions: Bundle) {
+        manager.updateAppWidget(id, WidgetRenderer.newNote(context, id, newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)))
+        WidgetRefreshReceiver().onRendered(context)
+    }
 }
 class SearchWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.search(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, newOptions: Bundle) {
+        manager.updateAppWidget(id, WidgetRenderer.search(context, id, newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)))
+        WidgetRefreshReceiver().onRendered(context)
+    }
 }
 class JournalWidget : AppWidgetProvider() {
     override fun onUpdate(context: Context, manager: AppWidgetManager, ids: IntArray) { ids.forEach { manager.updateAppWidget(it, WidgetRenderer.journal(context, it)) }; WidgetRefreshReceiver().onRendered(context) }
+    override fun onAppWidgetOptionsChanged(context: Context, manager: AppWidgetManager, id: Int, newOptions: Bundle) {
+        manager.updateAppWidget(id, WidgetRenderer.journal(context, id, newOptions.getInt(AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH, 0)))
+        WidgetRefreshReceiver().onRendered(context)
+    }
 }
 class NotesRemoteViewsService : RemoteViewsService() {
     override fun onGetViewFactory(intent: Intent): RemoteViewsFactory = Factory(applicationContext)

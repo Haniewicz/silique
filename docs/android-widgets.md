@@ -25,6 +25,16 @@ looks like an empty vault:
   usable yet, transient I/O): the list is hidden and the launcher shows
   "notes are temporarily unavailable" instead of "no notes". The file is kept.
 
+The three action widgets (**Nowa notatka**, **Szukaj**, **Wpis do dziennika**)
+show a full label by default, but collapse to a single glyph — `+`, `⌕`, `✎` —
+when the launcher squeezes them to one cell. The switch is driven by
+`AppWidgetManager.OPTION_APPWIDGET_MIN_WIDTH`: a positive width below
+`COMPACT_BELOW_DP` (100) selects the compact `widget_action_compact` layout, while
+zero or absent options keep the full two-slot form for back-compat. The providers
+override `onAppWidgetOptionsChanged` and render from the new options bundle so a
+resize in both directions repaints immediately; the full label remains the
+content description for accessibility in both forms.
+
 A render that lands locked or unreadable arms a bounded check-back: every 60 s for
 the first 30 checks, then every 10 minutes for up to 48 hours, and only the check
 that finds the state settled performs the render (the others decrypt nothing and
@@ -100,6 +110,9 @@ Keystore behavior, lock-screen rendering or launcher behavior on a physical phon
 
 1. Install the debug APK on an ARM64 Android device; add all four widgets and
    resize the notes list. Verify live saves/deletes refresh without reopening it.
+   Also shrink **Nowa notatka**, **Szukaj** and **Wpis do dziennika** to one cell
+   and confirm only their glyph (`+`, `⌕`, `✎`) is drawn, with the full label
+   kept as content description.
 2. Select a list row and a search result; confirm the exact vault/note opens.
    Type body/folder/tag terms in native search, cancel it, and verify Flutter
    never opened until result selection. Verify outside-tap dismissal and rotation.
