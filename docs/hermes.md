@@ -123,3 +123,32 @@ podpisane kanały. Samo przygotowanie konta ani wcześniejsza zgoda dotycząca
 innego wydania nie są zgodą na publikację kolejnej wersji. Nie uruchamiaj
 historycznego workflow `build.yml` z prywatnego repo — oficjalne paczki
 wykorzystują opisane osobne workflow i GTK4, bez automatycznych wyzwalaczy.
+
+### Testy natywne Kotlin/Robolectric w sandboxie agenta
+
+JDK 17 bierze `user.home` z `/etc/passwd` (=`/home/hermes`), dlatego Robolectric
+nie utworzy locka pobierania w katalogu domowym, a Gradle nie zapisze cache poza
+workspace. Działające wywołanie `:app:testDebugUnitTest` w sandboxie:
+
+```sh
+export JAVA_HOME=/home/hermes/.local/share/silique-toolchains/jdk17
+export ANDROID_HOME=/home/hermes/.local/share/silique-toolchains/android-sdk
+export ANDROID_SDK_ROOT=$ANDROID_HOME
+export FLUTTER_ROOT=/home/hermes/projects/Silique/.toolchain/flutter
+export HOME=/home/hermes/projects/Silique/.toolchain/home
+export JAVA_TOOL_OPTIONS="-Duser.home=$HOME -Dmaven.repo.local=/home/hermes/.m2/repository"
+export GRADLE_USER_HOME=/home/hermes/projects/Silique/.gradle-home
+export GRADLE_RO_DEP_CACHE=/home/hermes/.gradle/caches
+/home/hermes/.local/share/silique-toolchains/gradle-9.3.1/bin/gradle \
+  :app:testDebugUnitTest --offline --no-daemon --max-workers=1 \
+  -Dorg.gradle.jvmargs=-Xmx640m \
+  -Pkotlin.compiler.execution.strategy=in-process \
+  -Ptarget-platform=android-arm64
+```
+
+`--rerun` wymusza ponowne wykonanie testów. Wyniki:
+`build/app/test-results/testDebugUnitTest/*.xml` (katalog `build/` na poziomie
+repo, bo Flutter przenosi buildDir do `../build`). Pełny preflight
+(`silique preflight`) działa z `HOME` ustawionym jak wyżej; `dart run` z
+read-only SDK Fluttera kończy się po cichu kodem 1 — użyj
+`/home/hermes/projects/Silique/.toolchain/flutter/bin/dart`.
